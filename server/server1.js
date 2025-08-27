@@ -7,6 +7,12 @@ const cors = require("cors");
 
 const app = express();
 const server = http.createServer(app);
+const authRoutes = require('./routes/auth');
+const rideRoutes = require('./routes/rides');
+
+app.use('/api/auth', authRoutes);
+app.use('/api/rides', rideRoutes);
+
 
 // ---- middleware
 app.use(cors({ origin: "*", methods: ["GET", "POST"] }));

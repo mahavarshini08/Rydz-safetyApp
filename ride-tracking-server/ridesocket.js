@@ -1,6 +1,8 @@
 const User = require("../models/User");
 const Ride = require("../models/Ride");
 const { sendPushNotification } = require("../utils/push");
+const { verifyToken } = require("./utils/jwt");
+const ride = await Ride.findOne({ userId: socket.userId, endTime: null });
 
 module.exports = (socket, io) => {
 
@@ -19,7 +21,7 @@ module.exports = (socket, io) => {
     }
 
     // Broadcast to emergency contacts
-    const user = await User.findById(userId);
+    const user = await User.findById(socket.userId);
     user?.emergencyContacts?.forEach(contact => {
       if (contact.pushToken) sendPushNotification(contact.pushToken, "Ride Update", `User moved to [${latitude},${longitude}]`);
     });
@@ -36,10 +38,20 @@ module.exports = (socket, io) => {
 
   // Geofence breach
   socket.on("geofence_breach", async ({ userId, location }) => {
-    const user = await User.findById(userId);
+    const user = await User.findById(socket.userId);
     const message = "User exited safe zone!";
     user?.emergencyContacts?.forEach(contact => {
       if (contact.pushToken) sendPushNotification(contact.pushToken, "Ride Safety Alert", message);
     });
   });
 };
+io.use((socket, next) => {
+  const token = socket.handshake.auth.token;
+  const payload = verifyToken(token);
+  if (payload) {
+    socket.userId = payload.id;
+    next();
+  } else {
+    next(new Error("Unauthorized"));
+  }
+});
