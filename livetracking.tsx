@@ -1,12 +1,20 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+} from "react-native";
+import MapView, { Marker, Polyline, Circle } from "react-native-maps";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import io from "socket.io-client";
+import { getDistance } from "geolib";
 
 const BG_TASK = "RIDE_LOCATION_UPDATES";
 const SOCKET_URL = "http://192.168.1.7:4000"; // ⚡ your backend
+const GEOFENCE_RADIUS = 200; // in meters
 
 type Point = { latitude: number; longitude: number; timestamp?: number };
 
@@ -14,6 +22,9 @@ export default function LiveTrackingScreen() {
   const [tracking, setTracking] = useState(false);
   const [route, setRoute] = useState<Point[]>([]);
   const [current, setCurrent] = useState<Point | null>(null);
+  const [geofenceOrigin, setGeofenceOrigin] = useState<Point | null>(null);
+  const [outsideGeofence, setOutsideGeofence] = useState(false);
+
   const mapRef = useRef<MapView>(null);
   const socketRef = useRef<any>(null);
 
@@ -45,13 +56,16 @@ export default function LiveTrackingScreen() {
       await Location.requestBackgroundPermissionsAsync();
 
       const loc = await Location.getCurrentPositionAsync({});
-      const p = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+      const p = {
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+      };
       setCurrent(p);
       setRoute([p]);
     })();
   }, []);
 
-  // 🔹 Foreground updates for map
+  // 🔹 Foreground updates for map + geofence logic
   useEffect(() => {
     let sub: Location.LocationSubscription;
     (async () => {
@@ -66,19 +80,43 @@ export default function LiveTrackingScreen() {
           setCurrent(p);
           setRoute((r) => [...r, p]);
 
-          // ✅ Reuse socket
+          // ✅ Send to backend via socket
           if (socketRef.current?.connected) {
             socketRef.current.emit("location_update", p);
+          }
+
+          // ✅ Geofence detection logic
+          if (geofenceOrigin) {
+            const distance = getDistance(
+              { latitude: p.latitude, longitude: p.longitude },
+              {
+                latitude: geofenceOrigin.latitude,
+                longitude: geofenceOrigin.longitude,
+              }
+            );
+
+            if (distance > GEOFENCE_RADIUS && !outsideGeofence) {
+              setOutsideGeofence(true);
+              Alert.alert("⚠️ Alert", "You have exited the safe zone!");
+              // TODO: Trigger push/SMS alert here
+            } else if (distance <= GEOFENCE_RADIUS && outsideGeofence) {
+              setOutsideGeofence(false); // re-entered safe zone
+            }
           }
         }
       );
     })();
 
     return () => sub?.remove();
-  }, []);
+  }, [geofenceOrigin]);
 
   const startTracking = async () => {
     if (tracking) return;
+
+    if (current) {
+      setGeofenceOrigin(current); // 📍 Set geofence starting point
+    }
+
     await Location.startLocationUpdatesAsync(BG_TASK, {
       accuracy: Location.Accuracy.High,
       timeInterval: 3000,
@@ -89,17 +127,22 @@ export default function LiveTrackingScreen() {
       },
       pausesUpdatesAutomatically: false,
     });
+
     setTracking(true);
     Alert.alert("Ride started");
   };
 
   const stopTracking = async () => {
     if (!tracking) return;
+
     const tasks = await TaskManager.getRegisteredTasksAsync();
     if (tasks.find((t) => t.taskName === BG_TASK)) {
       await Location.stopLocationUpdatesAsync(BG_TASK);
     }
+
     setTracking(false);
+    setGeofenceOrigin(null);
+    setOutsideGeofence(false);
     Alert.alert("Ride ended");
   };
 
@@ -115,9 +158,20 @@ export default function LiveTrackingScreen() {
             latitudeDelta: 0.01,
             longitudeDelta: 0.01,
           }}
+          showsUserLocation
         >
-          <Polyline coordinates={route} strokeWidth={5} />
+          <Polyline coordinates={route} strokeWidth={5} strokeColor="blue" />
           <Marker coordinate={current} title="You" />
+
+          {/* 🔴 Geofence Circle */}
+          {geofenceOrigin && (
+            <Circle
+              center={geofenceOrigin}
+              radius={GEOFENCE_RADIUS}
+              strokeColor="rgba(255,0,0,0.6)"
+              fillColor="rgba(255,0,0,0.2)"
+            />
+          )}
         </MapView>
       ) : (
         <View style={styles.center}>
@@ -125,6 +179,16 @@ export default function LiveTrackingScreen() {
         </View>
       )}
 
+      {/* Geofence Status Display */}
+      {geofenceOrigin && (
+        <View style={styles.statusBanner}>
+          <Text style={{ fontWeight: "bold", color: outsideGeofence ? "red" : "green" }}>
+            {outsideGeofence ? "🚨 Outside Safe Zone" : "✅ Inside Safe Zone"}
+          </Text>
+        </View>
+      )}
+
+      {/* Start / Stop Buttons */}
       <View style={styles.controls}>
         <TouchableOpacity
           style={[styles.btn, tracking ? styles.btnDisabled : styles.btnStart]}
@@ -145,7 +209,7 @@ export default function LiveTrackingScreen() {
   );
 }
 
-// 🔹 Background task handler (send via HTTP for reliability)
+// 🔧 Background task to send location via HTTP
 TaskManager.defineTask(
   BG_TASK,
   async ({ data, error }: TaskManager.TaskManagerTaskBody<any>) => {
@@ -163,7 +227,7 @@ TaskManager.defineTask(
           timestamp: loc.timestamp,
         };
 
-        // ✅ Send via HTTP (better in background)
+        // ✅ Send to backend over HTTP
         await fetch(`${SOCKET_URL}/locations`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -195,4 +259,13 @@ const styles = StyleSheet.create({
   btnStop: { backgroundColor: "red" },
   btnDisabled: { backgroundColor: "gray" },
   btnText: { color: "#fff", fontWeight: "bold" },
+  statusBanner: {
+    position: "absolute",
+    top: 50,
+    alignSelf: "center",
+    backgroundColor: "white",
+    padding: 10,
+    borderRadius: 10,
+    elevation: 3,
+  },
 });
