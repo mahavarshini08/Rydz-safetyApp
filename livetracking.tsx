@@ -11,6 +11,7 @@ import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import io from "socket.io-client";
 import { getDistance } from "geolib";
+import { registerForPushNotificationsAsync } from './utils/notifications';
 
 const BG_TASK = "RIDE_LOCATION_UPDATES";
 const SOCKET_URL = "http://192.168.1.7:4000"; // ⚡ your backend
@@ -67,6 +68,14 @@ export default function LiveTrackingScreen() {
       setRoute([p]);
     })();
   }, []);
+
+  useEffect(() => {
+  registerForPushNotificationsAsync().then((token) => {
+    if (token) {
+      // Optional: Save token to backend or display
+    }
+  });
+}, []);
 
   // 🔹 Foreground updates for map + geofence logic
   useEffect(() => {
