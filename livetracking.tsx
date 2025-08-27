@@ -19,11 +19,14 @@ const GEOFENCE_RADIUS = 200; // in meters
 type Point = { latitude: number; longitude: number; timestamp?: number };
 
 export default function LiveTrackingScreen() {
+  console.log("LiveTrackingScreen loaded");
+
   const [tracking, setTracking] = useState(false);
   const [route, setRoute] = useState<Point[]>([]);
   const [current, setCurrent] = useState<Point | null>(null);
   const [geofenceOrigin, setGeofenceOrigin] = useState<Point | null>(null);
   const [outsideGeofence, setOutsideGeofence] = useState(false);
+  const [distanceFromOrigin, setDistanceFromOrigin] = useState<number | null>(null);
 
   const mapRef = useRef<MapView>(null);
   const socketRef = useRef<any>(null);
@@ -95,12 +98,16 @@ export default function LiveTrackingScreen() {
               }
             );
 
+            setDistanceFromOrigin(distance);
+
             if (distance > GEOFENCE_RADIUS && !outsideGeofence) {
-              setOutsideGeofence(true);
+              console.log("🚨 Outside Safe Zone detected!", distance);
               Alert.alert("⚠️ Alert", "You have exited the safe zone!");
+              setOutsideGeofence(true);
               // TODO: Trigger push/SMS alert here
             } else if (distance <= GEOFENCE_RADIUS && outsideGeofence) {
-              setOutsideGeofence(false); // re-entered safe zone
+              console.log("✅ Re-entered Safe Zone", distance);
+              setOutsideGeofence(false);
             }
           }
         }
@@ -113,9 +120,13 @@ export default function LiveTrackingScreen() {
   const startTracking = async () => {
     if (tracking) return;
 
-    if (current) {
-      setGeofenceOrigin(current); // 📍 Set geofence starting point
+    if (!current) {
+      Alert.alert("Waiting for GPS fix", "Current location not yet available.");
+      return;
     }
+
+    setGeofenceOrigin(current); // 📍 Set geofence starting point
+    console.log("Geofence origin set:", current);
 
     await Location.startLocationUpdatesAsync(BG_TASK, {
       accuracy: Location.Accuracy.High,
@@ -143,6 +154,7 @@ export default function LiveTrackingScreen() {
     setTracking(false);
     setGeofenceOrigin(null);
     setOutsideGeofence(false);
+    setDistanceFromOrigin(null);
     Alert.alert("Ride ended");
   };
 
@@ -185,15 +197,16 @@ export default function LiveTrackingScreen() {
           <Text style={{ fontWeight: "bold", color: outsideGeofence ? "red" : "green" }}>
             {outsideGeofence ? "🚨 Outside Safe Zone" : "✅ Inside Safe Zone"}
           </Text>
+          <Text>Distance from origin: {distanceFromOrigin !== null ? `${distanceFromOrigin} m` : "…"}</Text>
         </View>
       )}
 
       {/* Start / Stop Buttons */}
       <View style={styles.controls}>
         <TouchableOpacity
-          style={[styles.btn, tracking ? styles.btnDisabled : styles.btnStart]}
+          style={[styles.btn, tracking || !current ? styles.btnDisabled : styles.btnStart]}
           onPress={startTracking}
-          disabled={tracking}
+          disabled={tracking || !current}
         >
           <Text style={styles.btnText}>Start Ride</Text>
         </TouchableOpacity>
@@ -267,5 +280,6 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 10,
     elevation: 3,
+    alignItems: "center",
   },
 });
