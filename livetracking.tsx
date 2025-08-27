@@ -6,8 +6,7 @@ import * as TaskManager from "expo-task-manager";
 import io from "socket.io-client";
 
 const BG_TASK = "RIDE_LOCATION_UPDATES";
-const SOCKET_URL = "http://192.168.x.x:4000";  // replace with your IP
-
+const SOCKET_URL = "http://192.168.1.7:4000";
 
 const socket = io(SOCKET_URL, { transports: ["websocket"] });
 
