@@ -12,6 +12,8 @@ import * as TaskManager from "expo-task-manager";
 import io from "socket.io-client";
 import { getDistance } from "geolib";
 import { registerForPushNotificationsAsync } from './utils/notifications';
+import * as Notifications from 'expo-notifications';
+
 
 const BG_TASK = "RIDE_LOCATION_UPDATES";
 const SOCKET_URL = "http://192.168.1.7:4000"; // ⚡ your backend
@@ -70,12 +72,13 @@ export default function LiveTrackingScreen() {
   }, []);
 
   useEffect(() => {
-  registerForPushNotificationsAsync().then((token) => {
-    if (token) {
-      // Optional: Save token to backend or display
-    }
-  });
-}, []);
+    // Register for push notifications
+    registerForPushNotificationsAsync().then((token) => {
+      if (token) {
+        // Optional: Save token to backend or display
+      }
+    });
+  }, []);
 
   // 🔹 Foreground updates for map + geofence logic
   useEffect(() => {
@@ -83,7 +86,7 @@ export default function LiveTrackingScreen() {
     (async () => {
       sub = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.High, distanceInterval: 5 },
-        (loc) => {
+        async (loc) => {
           const p = {
             latitude: loc.coords.latitude,
             longitude: loc.coords.longitude,
@@ -110,13 +113,25 @@ export default function LiveTrackingScreen() {
             setDistanceFromOrigin(distance);
 
             if (distance > GEOFENCE_RADIUS && !outsideGeofence) {
-              console.log("🚨 Outside Safe Zone detected!", distance);
-              Alert.alert("⚠️ Alert", "You have exited the safe zone!");
+              // Geofence breach detected
               setOutsideGeofence(true);
-              // TODO: Trigger push/SMS alert here
+              console.log("🚨 Outside Safe Zone detected!", distance);
+
+              // Send push notification for geofence breach
+              await Notifications.scheduleNotificationAsync({
+                content: {
+                  title: "🚨 Geofence Alert",
+                  body: "You have exited the safe zone!",
+                  sound: true,
+                },
+                trigger: null, // Immediate notification
+              });
+
+              Alert.alert("⚠️ Alert", "You have exited the safe zone!");
             } else if (distance <= GEOFENCE_RADIUS && outsideGeofence) {
-              console.log("✅ Re-entered Safe Zone", distance);
+              // User re-entered safe zone
               setOutsideGeofence(false);
+              console.log("✅ Re-entered Safe Zone", distance);
             }
           }
         }
@@ -124,7 +139,22 @@ export default function LiveTrackingScreen() {
     })();
 
     return () => sub?.remove();
-  }, [geofenceOrigin]);
+  }, [geofenceOrigin, outsideGeofence]);
+  <TouchableOpacity
+  onPress={async () => {
+    // Send panic alert to the user or emergency contacts
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "⚠️ Panic Alert",
+        body: "User has triggered a panic alert!",
+        sound: true,
+      },
+      trigger: null, // Immediate notification
+    });
+  }}
+>
+  <Text>Panic Button</Text>
+</TouchableOpacity>
 
   const startTracking = async () => {
     if (tracking) return;
