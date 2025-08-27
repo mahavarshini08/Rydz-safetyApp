@@ -6,9 +6,7 @@ import * as TaskManager from "expo-task-manager";
 import io from "socket.io-client";
 
 const BG_TASK = "RIDE_LOCATION_UPDATES";
-const SOCKET_URL = "http://192.168.1.7:4000";
-
-const socket = io(SOCKET_URL, { transports: ["websocket"] });
+const SOCKET_URL = "http://192.168.1.7:4000"; // ⚡ your backend
 
 type Point = { latitude: number; longitude: number; timestamp?: number };
 
@@ -17,14 +15,26 @@ export default function LiveTrackingScreen() {
   const [route, setRoute] = useState<Point[]>([]);
   const [current, setCurrent] = useState<Point | null>(null);
   const mapRef = useRef<MapView>(null);
+  const socketRef = useRef<any>(null);
 
+  // 🔹 Setup socket connection (once)
   useEffect(() => {
-    socket.on("connect", () => console.log("Socket connected", socket.id));
+    socketRef.current = io(SOCKET_URL, { transports: ["websocket"] });
+
+    socketRef.current.on("connect", () => {
+      console.log("🔗 Socket connected:", socketRef.current.id);
+    });
+
+    socketRef.current.on("disconnect", () => {
+      console.log("❌ Socket disconnected");
+    });
+
     return () => {
-      socket.disconnect();
+      socketRef.current?.disconnect();
     };
   }, []);
 
+  // 🔹 Ask for permissions & set initial location
   useEffect(() => {
     (async () => {
       const fg = await Location.requestForegroundPermissionsAsync();
@@ -39,6 +49,32 @@ export default function LiveTrackingScreen() {
       setCurrent(p);
       setRoute([p]);
     })();
+  }, []);
+
+  // 🔹 Foreground updates for map
+  useEffect(() => {
+    let sub: Location.LocationSubscription;
+    (async () => {
+      sub = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.High, distanceInterval: 5 },
+        (loc) => {
+          const p = {
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude,
+            timestamp: loc.timestamp,
+          };
+          setCurrent(p);
+          setRoute((r) => [...r, p]);
+
+          // ✅ Reuse socket
+          if (socketRef.current?.connected) {
+            socketRef.current.emit("location_update", p);
+          }
+        }
+      );
+    })();
+
+    return () => sub?.remove();
   }, []);
 
   const startTracking = async () => {
@@ -84,7 +120,9 @@ export default function LiveTrackingScreen() {
           <Marker coordinate={current} title="You" />
         </MapView>
       ) : (
-        <View style={styles.center}><Text>Getting location…</Text></View>
+        <View style={styles.center}>
+          <Text>Getting location…</Text>
+        </View>
       )}
 
       <View style={styles.controls}>
@@ -107,6 +145,7 @@ export default function LiveTrackingScreen() {
   );
 }
 
+// 🔹 Background task handler (send via HTTP for reliability)
 TaskManager.defineTask(
   BG_TASK,
   async ({ data, error }: TaskManager.TaskManagerTaskBody<any>) => {
@@ -124,19 +163,21 @@ TaskManager.defineTask(
           timestamp: loc.timestamp,
         };
 
-        // Emit location update to backend
-        socket.emit("location_update", point);
-        console.log("📍 Location sent:", point);
+        // ✅ Send via HTTP (better in background)
+        await fetch(`${SOCKET_URL}/locations`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(point),
+        });
+
+        console.log("📡 Background Location sent:", point);
       }
     } catch (err) {
       console.error("Background task failed:", err);
     }
-
-    // Always return a Promise
     return Promise.resolve();
   }
 );
-
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
