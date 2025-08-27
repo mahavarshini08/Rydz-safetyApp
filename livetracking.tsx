@@ -9,21 +9,19 @@ import {
 import MapView, { Marker, Polyline, Circle } from "react-native-maps";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
-import io from "socket.io-client";
+import io, { Socket } from "socket.io-client";
 import { getDistance } from "geolib";
-import { registerForPushNotificationsAsync } from './utils/notifications';
-import * as Notifications from 'expo-notifications';
-
+import { registerForPushNotificationsAsync } from "./utils/notifications";
+import * as Notifications from "expo-notifications";
 
 const BG_TASK = "RIDE_LOCATION_UPDATES";
-const SOCKET_URL = "http://192.168.1.7:4000"; // ⚡ your backend
-const GEOFENCE_RADIUS = 200; // in meters
+const SOCKET_URL = "http://192.168.1.7:4000"; // Your backend
+const GEOFENCE_RADIUS = 200; // meters
+const MAX_ROUTE_POINTS = 100; // throttle polyline length
 
 type Point = { latitude: number; longitude: number; timestamp?: number };
 
 export default function LiveTrackingScreen() {
-  console.log("LiveTrackingScreen loaded");
-
   const [tracking, setTracking] = useState(false);
   const [route, setRoute] = useState<Point[]>([]);
   const [current, setCurrent] = useState<Point | null>(null);
@@ -32,106 +30,91 @@ export default function LiveTrackingScreen() {
   const [distanceFromOrigin, setDistanceFromOrigin] = useState<number | null>(null);
 
   const mapRef = useRef<MapView>(null);
-  const socketRef = useRef<any>(null);
+  const socketRef = useRef<Socket | null>(null);
 
-  // 🔹 Setup socket connection (once)
+  // Initialize socket
   useEffect(() => {
-    socketRef.current = io(SOCKET_URL, { transports: ["websocket"] });
+  socketRef.current = io(SOCKET_URL, { transports: ["websocket"] });
 
-    socketRef.current.on("connect", () => {
-      console.log("🔗 Socket connected:", socketRef.current.id);
-    });
+  socketRef.current.on("connect", () => console.log("Socket connected:", socketRef.current?.id));
+  socketRef.current.on("disconnect", () => console.log("Socket disconnected"));
 
-    socketRef.current.on("disconnect", () => {
-      console.log("❌ Socket disconnected");
-    });
+  // Cleanup function
+  return () => {
+    socketRef.current?.disconnect();
+  };
+}, []);
 
-    return () => {
-      socketRef.current?.disconnect();
-    };
-  }, []);
 
-  // 🔹 Ask for permissions & set initial location
+  // Request permissions & initial location
   useEffect(() => {
     (async () => {
       const fg = await Location.requestForegroundPermissionsAsync();
-      if (fg.status !== "granted") {
-        Alert.alert("Permission needed", "Foreground location is required.");
+      const bg = await Location.requestBackgroundPermissionsAsync();
+
+      if (fg.status !== "granted" || bg.status !== "granted") {
+        Alert.alert(
+          "Permission needed",
+          "Foreground and background location are required."
+        );
         return;
       }
-      await Location.requestBackgroundPermissionsAsync();
 
       const loc = await Location.getCurrentPositionAsync({});
-      const p = {
-        latitude: loc.coords.latitude,
-        longitude: loc.coords.longitude,
-      };
+      const p: Point = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
       setCurrent(p);
       setRoute([p]);
     })();
   }, []);
 
+  // Register push notifications
   useEffect(() => {
-    // Register for push notifications
     registerForPushNotificationsAsync().then((token) => {
-      if (token) {
-        // Optional: Save token to backend or display
+      if (token && socketRef.current?.connected) {
+        socketRef.current.emit("register_push_token", { token });
       }
     });
   }, []);
 
-  // 🔹 Foreground updates for map + geofence logic
+  // Foreground location updates
   useEffect(() => {
     let sub: Location.LocationSubscription;
+
     (async () => {
       sub = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.High, distanceInterval: 5 },
         async (loc) => {
-          const p = {
+          const p: Point = {
             latitude: loc.coords.latitude,
             longitude: loc.coords.longitude,
             timestamp: loc.timestamp,
           };
           setCurrent(p);
-          setRoute((r) => [...r, p]);
+          setRoute((r) => [...r.slice(-MAX_ROUTE_POINTS + 1), p]);
 
-          // ✅ Send to backend via socket
-          if (socketRef.current?.connected) {
-            socketRef.current.emit("location_update", p);
-          }
+          // Send live location via socket
+          socketRef.current?.connected && socketRef.current.emit("location_update", p);
 
-          // ✅ Geofence detection logic
+          // Geofence detection
           if (geofenceOrigin) {
-            const distance = getDistance(
-              { latitude: p.latitude, longitude: p.longitude },
-              {
-                latitude: geofenceOrigin.latitude,
-                longitude: geofenceOrigin.longitude,
-              }
-            );
-
+            const distance = getDistance(p, geofenceOrigin);
             setDistanceFromOrigin(distance);
 
             if (distance > GEOFENCE_RADIUS && !outsideGeofence) {
-              // Geofence breach detected
               setOutsideGeofence(true);
-              console.log("🚨 Outside Safe Zone detected!", distance);
+              console.log("Outside Safe Zone", distance);
 
-              // Send push notification for geofence breach
+              socketRef.current?.connected && socketRef.current.emit("geofence_breach", { location: p });
+
               await Notifications.scheduleNotificationAsync({
-                content: {
-                  title: "🚨 Geofence Alert",
-                  body: "You have exited the safe zone!",
-                  sound: true,
-                },
-                trigger: null, // Immediate notification
+                content: { title: "🚨 Geofence Alert", body: "You exited the safe zone!", sound: true },
+                trigger: null,
               });
 
               Alert.alert("⚠️ Alert", "You have exited the safe zone!");
             } else if (distance <= GEOFENCE_RADIUS && outsideGeofence) {
-              // User re-entered safe zone
               setOutsideGeofence(false);
-              console.log("✅ Re-entered Safe Zone", distance);
+              console.log("Re-entered Safe Zone", distance);
             }
           }
         }
@@ -140,32 +123,12 @@ export default function LiveTrackingScreen() {
 
     return () => sub?.remove();
   }, [geofenceOrigin, outsideGeofence]);
-  <TouchableOpacity
-  onPress={async () => {
-    // Send panic alert to the user or emergency contacts
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: "⚠️ Panic Alert",
-        body: "User has triggered a panic alert!",
-        sound: true,
-      },
-      trigger: null, // Immediate notification
-    });
-  }}
->
-  <Text>Panic Button</Text>
-</TouchableOpacity>
 
+  // Start tracking
   const startTracking = async () => {
-    if (tracking) return;
+    if (tracking || !current) return;
 
-    if (!current) {
-      Alert.alert("Waiting for GPS fix", "Current location not yet available.");
-      return;
-    }
-
-    setGeofenceOrigin(current); // 📍 Set geofence starting point
-    console.log("Geofence origin set:", current);
+    setGeofenceOrigin(current);
 
     await Location.startLocationUpdatesAsync(BG_TASK, {
       accuracy: Location.Accuracy.High,
@@ -182,6 +145,7 @@ export default function LiveTrackingScreen() {
     Alert.alert("Ride started");
   };
 
+  // Stop tracking
   const stopTracking = async () => {
     if (!tracking) return;
 
@@ -195,6 +159,17 @@ export default function LiveTrackingScreen() {
     setOutsideGeofence(false);
     setDistanceFromOrigin(null);
     Alert.alert("Ride ended");
+  };
+
+  // Panic alert
+  const triggerPanic = async () => {
+    if (!current) return;
+    socketRef.current?.connected && socketRef.current.emit("panic_alert", { location: current });
+    await Notifications.scheduleNotificationAsync({
+      content: { title: "⚠️ Panic Alert", body: "User triggered a panic alert!", sound: true },
+      trigger: null,
+    });
+    Alert.alert("Panic alert sent!");
   };
 
   return (
@@ -213,8 +188,6 @@ export default function LiveTrackingScreen() {
         >
           <Polyline coordinates={route} strokeWidth={5} strokeColor="blue" />
           <Marker coordinate={current} title="You" />
-
-          {/* 🔴 Geofence Circle */}
           {geofenceOrigin && (
             <Circle
               center={geofenceOrigin}
@@ -230,7 +203,6 @@ export default function LiveTrackingScreen() {
         </View>
       )}
 
-      {/* Geofence Status Display */}
       {geofenceOrigin && (
         <View style={styles.statusBanner}>
           <Text style={{ fontWeight: "bold", color: outsideGeofence ? "red" : "green" }}>
@@ -240,7 +212,6 @@ export default function LiveTrackingScreen() {
         </View>
       )}
 
-      {/* Start / Stop Buttons */}
       <View style={styles.controls}>
         <TouchableOpacity
           style={[styles.btn, tracking || !current ? styles.btnDisabled : styles.btnStart]}
@@ -249,6 +220,7 @@ export default function LiveTrackingScreen() {
         >
           <Text style={styles.btnText}>Start Ride</Text>
         </TouchableOpacity>
+
         <TouchableOpacity
           style={[styles.btn, !tracking ? styles.btnDisabled : styles.btnStop]}
           onPress={stopTracking}
@@ -256,44 +228,41 @@ export default function LiveTrackingScreen() {
         >
           <Text style={styles.btnText}>End Ride</Text>
         </TouchableOpacity>
+
+        <TouchableOpacity style={styles.btn} onPress={triggerPanic}>
+          <Text style={styles.btnText}>Panic</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
 }
 
-// 🔧 Background task to send location via HTTP
-TaskManager.defineTask(
-  BG_TASK,
-  async ({ data, error }: TaskManager.TaskManagerTaskBody<any>) => {
-    try {
-      if (error) {
-        console.error("Task error:", error);
-        return;
-      }
+// Background task
+TaskManager.defineTask(BG_TASK, async ({ data, error }) => {
+  try {
+    if (error) return console.error("Task error:", error);
 
-      if (data?.locations?.length) {
-        const loc = data.locations[0];
-        const point: Point = {
-          latitude: loc.coords.latitude,
-          longitude: loc.coords.longitude,
-          timestamp: loc.timestamp,
-        };
+    const locationData = data as { locations?: Location.LocationObject[] };
+    if (locationData?.locations?.length) {
+      const loc = locationData.locations[0];
+      const point: Point = {
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        timestamp: loc.timestamp,
+      };
 
-        // ✅ Send to backend over HTTP
-        await fetch(`${SOCKET_URL}/locations`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(point),
-        });
+      await fetch(`${SOCKET_URL}/locations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(point),
+      });
 
-        console.log("📡 Background Location sent:", point);
-      }
-    } catch (err) {
-      console.error("Background task failed:", err);
+      console.log("📡 Background Location sent:", point);
     }
-    return Promise.resolve();
+  } catch (err) {
+    console.error("Background task failed:", err);
   }
-);
+});
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
@@ -306,7 +275,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
   },
-  btn: { flex: 1, padding: 14, borderRadius: 12, alignItems: "center" },
+  btn: { flex: 1, padding: 14, borderRadius: 12, alignItems: "center", marginHorizontal: 5, backgroundColor: "#555" },
   btnStart: { backgroundColor: "green" },
   btnStop: { backgroundColor: "red" },
   btnDisabled: { backgroundColor: "gray" },

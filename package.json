@@ -13,13 +13,18 @@
   "dependencies": {
     "@react-navigation/native": "^7.1.16",
     "@react-navigation/native-stack": "^7.3.23",
+    "cors": "^2.8.5",
     "expo": "~53.0.22",
     "expo-device": "~7.1.4",
     "expo-location": "~18.1.6",
     "expo-notifications": "~0.31.4",
+    "expo-sms": "~13.1.4",
     "expo-status-bar": "~2.2.3",
     "expo-task-manager": "~13.1.6",
+    "express": "^5.1.0",
     "geolib": "^3.3.4",
+    "mongoose": "^8.18.0",
+    "node-fetch": "^3.3.2",
     "react": "19.0.0",
     "react-native": "0.79.5",
     "react-native-gesture-handler": "~2.24.0",
@@ -27,8 +32,8 @@
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
     "sms": "^0.0.13",
-    "socket.io-client": "^4.8.1",
-    "expo-sms": "~13.1.4"
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
@@ -36,5 +41,18 @@
     "@types/react-native": "^0.72.8",
     "typescript": "~5.8.3"
   },
-  "private": true
+  "private": true,
+  "description": "",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mahavarshini08/Rydz-safetyApp.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/mahavarshini08/Rydz-safetyApp/issues"
+  },
+  "homepage": "https://github.com/mahavarshini08/Rydz-safetyApp#readme"
 }
