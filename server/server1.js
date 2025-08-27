@@ -36,6 +36,16 @@ io.on("connection", (socket) => {
   });
 });
 
+// 👉 Root route so browser doesn't show "Cannot GET /"
+app.get("/", (req, res) => {
+  res.send("Ride Safety Backend is running ✅");
+});
+
+// 👉 Optional: expose all live clients
+app.get("/locations", (req, res) => {
+  res.json(clients);
+});
+
 // Start server
 const PORT = 4000;
 server.listen(PORT, () => {
