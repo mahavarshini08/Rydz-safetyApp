@@ -1,55 +1,45 @@
-const express = require("express");
-const http = require("http");
-const socketIo = require("socket.io");
-const mongoose = require("mongoose");
-const cors = require("cors");
+// backend/ride-tracking-server/server.js
+require('dotenv').config();
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const mongoose = require('mongoose');
+const cors = require('cors');
 
-const rideSocket = require("./socketHandlers/rideSocket");
-const User = require("./models/User");
-const Ride = require("./models/Ride");
+const rideSocket = require('./ridesocket'); // note: file exports a function that accepts io
 
 const app = express();
-const server = http.createServer(app);
-const io = socketIo(server, { cors: { origin: "*" } });
-
-app.use(cors());
 app.use(express.json());
+app.use(cors());
 
-// MongoDB connection
-mongoose.connect("mongodb://127.0.0.1:27017/ride_safety", {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+// Basic auth route (example)
+const User = require('./models/User');
+const jwtUtil = require('./jwt');
 
-// Socket.io connection
-io.on("connection", (socket) => {
-  console.log("Socket connected:", socket.id);
-  rideSocket(socket, io);
-});
-
-// Ride endpoints
-app.post("/rides/start", async (req, res) => {
-  const { userId } = req.body;
-  const ride = await Ride.create({ userId, startTime: new Date(), route: [] });
-  res.json({ success: true, rideId: ride._id });
-});
-
-app.post("/rides/end", async (req, res) => {
-  const { rideId } = req.body;
-  await Ride.findByIdAndUpdate(rideId, { endTime: new Date() });
-  res.json({ success: true });
-});
-
-// Background location endpoint
-app.post("/locations", async (req, res) => {
-  const { latitude, longitude, timestamp, userId } = req.body;
-  const ride = await Ride.findOne({ userId, endTime: null });
-  if (ride) {
-    ride.route.push({ latitude, longitude, timestamp });
-    await ride.save();
+app.post('/auth/login', async (req, res) => {
+  const { phone } = req.body;
+  if (!phone) return res.status(400).json({ error: 'Phone required' });
+  let user = await User.findOne({ phone });
+  if (!user) {
+    // auto-create for demo — in production use proper signup
+    user = await User.create({ phone });
   }
-  res.json({ success: true });
+  const token = jwtUtil.generateToken(user);
+  res.json({ token, user });
 });
 
-const PORT = 4000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+const server = http.createServer(app);
+const io = socketIo(server, { cors: { origin: '*' } });
+
+// attach socket handlers
+rideSocket(io);
+
+const MONGO = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/rydz';
+mongoose.connect(MONGO, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log('Mongo connected'))
+  .catch((err) => console.error('Mongo connection error', err));
+
+const PORT = process.env.PORT || 4000;
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on http://0.0.0.0:${PORT}`);
+});

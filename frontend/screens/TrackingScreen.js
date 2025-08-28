@@ -1,65 +1,73 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
-import * as Location from 'expo-location';
+// frontend/screens/TrackingScreen.js
+import React, { useEffect, useState, useRef } from "react";
+import { View, StyleSheet, ActivityIndicator, Alert } from "react-native";
+import MapView, { Marker } from "react-native-maps";
+import * as Location from "expo-location";
+import io from "socket.io-client";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { API_URL } from "../config";
 
-function getDistanceMeters(lat1, lon1, lat2, lon2) {
-  const R = 6371e3; // Earth radius in meters
-  const toRad = (deg) => deg * (Math.PI / 180);
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) *
-      Math.cos(toRad(lat2)) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-export default function TrackingScreen({ route }) {
-  const { destination } = route.params;
+export default function TrackingScreen() {
   const [currentLocation, setCurrentLocation] = useState(null);
-  const [destinationCoords, setDestinationCoords] = useState(null);
+  const [dest, setDest] = useState({ latitude: 0, longitude: 0 });
+  const socketRef = useRef(null);
 
   useEffect(() => {
+    let mounted = true;
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        alert('Permission denied');
+      if (status !== "granted") {
+        Alert.alert("Permission denied", "Enable location permission to use tracking");
         return;
       }
-
-      // Convert destination string to coordinates
-      const geo = await Location.geocodeAsync(destination);
-      if (geo.length === 0) {
-        alert('Invalid destination');
-        return;
-      }
-      const dest = geo[0];
-      setDestinationCoords(dest);
-
-      // Start location tracking
-      Location.watchPositionAsync({ accuracy: 5, distanceInterval: 10 }, (loc) => {
-        const { latitude, longitude } = loc.coords;
-        setCurrentLocation(loc.coords);
-
-        // Check distance to destination
-        const dist = getDistanceMeters(latitude, longitude, dest.latitude, dest.longitude);
-        if (dist > 100) {
-          Alert.alert('⚠️ Route Deviation Detected!');
-        }
-      });
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+      if (!mounted) return;
+      setCurrentLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
     })();
+
+    return () => { mounted = false; };
   }, []);
 
-  if (!currentLocation || !destinationCoords) {
+  useEffect(() => {
+    // connect socket
+    socketRef.current = io(API_URL, { transports: ["websocket"] });
+    socketRef.current.on("connect", () => console.log("socket connected", socketRef.current.id));
+    socketRef.current.on("disconnect", () => console.log("socket disconnected"));
+
+    const watchIdPromise = (async () => {
+      const token = await AsyncStorage.getItem("token"); // optionally send auth
+      if (token && socketRef.current) {
+        socketRef.current.emit("authenticate", { token });
+      }
+
+      const watcher = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, timeInterval: 3000, distanceInterval: 5 },
+        (loc) => {
+          const payload = {
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude,
+            timestamp: loc.timestamp,
+          };
+          setCurrentLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+          if (socketRef.current && socketRef.current.connected) {
+            socketRef.current.emit("location_update", payload);
+          }
+        }
+      );
+
+      return watcher;
+    })();
+
+    return () => {
+      if (socketRef.current) socketRef.current.disconnect();
+      watchIdPromise.then((watcher) => watcher && watcher.remove && watcher.remove());
+    };
+  }, []);
+
+  if (!currentLocation) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator />
       </View>
     );
   }
@@ -67,7 +75,7 @@ export default function TrackingScreen({ route }) {
   return (
     <MapView
       style={styles.map}
-      region={{
+      initialRegion={{
         latitude: currentLocation.latitude,
         longitude: currentLocation.longitude,
         latitudeDelta: 0.01,
@@ -75,12 +83,12 @@ export default function TrackingScreen({ route }) {
       }}
     >
       <Marker coordinate={currentLocation} title="You" />
-      <Marker coordinate={destinationCoords} pinColor="blue" title="Destination" />
+      <Marker coordinate={dest} title="Destination" pinColor="blue" />
     </MapView>
   );
 }
 
 const styles = StyleSheet.create({
   map: { flex: 1 },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
 });

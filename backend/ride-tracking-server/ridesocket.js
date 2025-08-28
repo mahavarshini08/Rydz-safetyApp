@@ -1,57 +1,57 @@
-const User = require("../models/User");
-const Ride = require("../models/Ride");
-const { sendPushNotification } = require("../utils/push");
-const { verifyToken } = require("./utils/jwt");
-const ride = await Ride.findOne({ userId: socket.userId, endTime: null });
+// backend/ride-tracking-server/ridesocket.js
+const Ride = require("./models/Ride");
+const User = require("./models/User");
+const { verifyToken } = require("./jwt");
 
-module.exports = (socket, io) => {
+module.exports = (io) => {
+  io.on("connection", (socket) => {
+    console.log("socket connected:", socket.id);
 
-  // Register push token
-  socket.on("register_push_token", async ({ userId, token }) => {
-    await User.findByIdAndUpdate(userId, { pushToken: token });
-  });
-
-  // Live location updates
-  socket.on("location_update", async ({ userId, latitude, longitude, timestamp }) => {
-    // Save to current ride if needed
-    const ride = await Ride.findOne({ userId, endTime: null });
-    if (ride) {
-      ride.route.push({ latitude, longitude, timestamp });
-      await ride.save();
-    }
-
-    // Broadcast to emergency contacts
-    const user = await User.findById(socket.userId);
-    user?.emergencyContacts?.forEach(contact => {
-      if (contact.pushToken) sendPushNotification(contact.pushToken, "Ride Update", `User moved to [${latitude},${longitude}]`);
+    socket.on("authenticate", async ({ token }) => {
+      try {
+        const payload = verifyToken(token);
+        if (payload && payload.id) {
+          socket.userId = payload.id;
+          console.log("socket authenticated user:", payload.id);
+        }
+      } catch (e) {
+        console.warn("auth failed", e);
+      }
     });
-  });
 
-  // Panic alert
-  socket.on("panic_alert", async ({ userId, location }) => {
-    const user = await User.findById(userId);
-    const message = "Panic alert triggered!";
-    user?.emergencyContacts?.forEach(contact => {
-      if (contact.pushToken) sendPushNotification(contact.pushToken, "Ride Safety Alert", message);
+    socket.on("location_update", async (data) => {
+      // data: { latitude, longitude, timestamp }
+      try {
+        if (!socket.userId) return; // require auth (optional)
+        // find or create active ride
+        let ride = await Ride.findOne({ userId: socket.userId, endTime: null });
+        if (!ride) {
+          ride = new Ride({ userId: socket.userId, path: [] });
+        }
+        ride.path.push({ latitude: data.latitude, longitude: data.longitude, timestamp: data.timestamp });
+        await ride.save();
+        // broadcast to others if needed
+        io.emit("location_broadcast", { userId: socket.userId, latitude: data.latitude, longitude: data.longitude });
+      } catch (err) {
+        console.error("location_update error:", err);
+      }
     });
-  });
 
-  // Geofence breach
-  socket.on("geofence_breach", async ({ userId, location }) => {
-    const user = await User.findById(socket.userId);
-    const message = "User exited safe zone!";
-    user?.emergencyContacts?.forEach(contact => {
-      if (contact.pushToken) sendPushNotification(contact.pushToken, "Ride Safety Alert", message);
+    socket.on("end_ride", async () => {
+      try {
+        if (!socket.userId) return;
+        const ride = await Ride.findOne({ userId: socket.userId, endTime: null });
+        if (ride) {
+          ride.endTime = new Date();
+          await ride.save();
+        }
+      } catch (err) {
+        console.error("end_ride error:", err);
+      }
+    });
+
+    socket.on("disconnect", () => {
+      console.log("socket disconnected:", socket.id);
     });
   });
 };
-io.use((socket, next) => {
-  const token = socket.handshake.auth.token;
-  const payload = verifyToken(token);
-  if (payload) {
-    socket.userId = payload.id;
-    next();
-  } else {
-    next(new Error("Unauthorized"));
-  }
-});
