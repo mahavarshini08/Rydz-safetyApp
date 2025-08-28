@@ -6,7 +6,7 @@ const socketIo = require('socket.io');
 const mongoose = require('mongoose');
 const cors = require('cors');
 
-const rideSocket = require('./socketHandlers/rideSocket');
+const rideSocket = require('./socketHandlers/ridesocket');
 
 const app = express();
 app.use(express.json());

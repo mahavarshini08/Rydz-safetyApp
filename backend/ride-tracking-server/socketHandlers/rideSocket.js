@@ -1,7 +1,7 @@
-// backend/ride-tracking-server/ridesocket.js
-const Ride = require("./models/Ride");
-const User = require("./models/User");
-const { verifyToken } = require("./jwt");
+// backend/ride-tracking-server/socketHandlers/rideSocket.js
+const Ride = require("../models/Ride");
+const User = require("../models/User");
+const { verifyToken } = require("../jwt");
 
 module.exports = (io) => {
   io.on("connection", (socket) => {
@@ -20,18 +20,23 @@ module.exports = (io) => {
     });
 
     socket.on("location_update", async (data) => {
-      // data: { latitude, longitude, timestamp }
       try {
-        if (!socket.userId) return; // require auth (optional)
-        // find or create active ride
+        if (!socket.userId) return;
         let ride = await Ride.findOne({ userId: socket.userId, endTime: null });
         if (!ride) {
           ride = new Ride({ userId: socket.userId, path: [] });
         }
-        ride.path.push({ latitude: data.latitude, longitude: data.longitude, timestamp: data.timestamp });
+        ride.path.push({
+          latitude: data.latitude,
+          longitude: data.longitude,
+          timestamp: data.timestamp,
+        });
         await ride.save();
-        // broadcast to others if needed
-        io.emit("location_broadcast", { userId: socket.userId, latitude: data.latitude, longitude: data.longitude });
+        io.emit("location_broadcast", {
+          userId: socket.userId,
+          latitude: data.latitude,
+          longitude: data.longitude,
+        });
       } catch (err) {
         console.error("location_update error:", err);
       }
