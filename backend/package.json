@@ -1,7 +1,7 @@
 {
   "name": "rydz-safetyapp-backend",
   "version": "1.0.0",
-  "main": "server1.js",
+  "main": "server.js",
   "scripts": {
     "start": "node ride-tracking-server/server.js",
     "dev": "nodemon ride-tracking-server/server.js"
@@ -11,7 +11,9 @@
     "express": "^5.1.0",
     "mongoose": "^8.18.0",
     "node-fetch": "^3.3.2",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "jsonwebtoken": "^9.0.2",
+    "dotenv": "^16.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

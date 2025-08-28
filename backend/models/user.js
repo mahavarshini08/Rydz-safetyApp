@@ -1,10 +1,11 @@
-// backend/ride-tracking-server/models/User.js
+// backend/models/user.js
 const mongoose = require("mongoose");
 
 const UserSchema = new mongoose.Schema({
   phone: { type: String, required: true, unique: true },
   name: String,
   pushToken: String,
+  emergencyContacts: [{ type: String }],
   createdAt: { type: Date, default: Date.now }
 });
 

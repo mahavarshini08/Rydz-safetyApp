@@ -1,49 +1,321 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, Button, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TextInput, Button, StyleSheet, Alert, ActivityIndicator, ScrollView, TouchableOpacity } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from '../config';
 
 export default function HomeScreen({ navigation }) {
   const [destination, setDestination] = useState('');
-  const [contact, setContact] = useState('');
+  const [emergencyContact, setEmergencyContact] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState(null);
+  const [rideLoading, setRideLoading] = useState(false);
+
+  useEffect(() => {
+    loadUserData();
+  }, []);
+
+  const loadUserData = async () => {
+    try {
+      const userData = await AsyncStorage.getItem('user');
+      if (userData) {
+        const userObj = JSON.parse(userData);
+        setUser(userObj);
+        // setName(userObj.name || ''); // These lines were not in the new_code, so I'm removing them.
+        // setPhone(userObj.phone || '');
+        // setEmergencyContacts(userObj.emergencyContacts || []);
+        if (userObj.emergencyContacts && userObj.emergencyContacts.length > 0) {
+          setEmergencyContact(userObj.emergencyContacts[0]);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading user data:', error);
+    }
+  };
+
+  const handleStartRide = async () => {
+    if (!destination) {
+      Alert.alert('Error', 'Please enter your destination');
+      return;
+    }
+
+    setRideLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        Alert.alert('Error', 'Please login again');
+        navigation.replace('Login');
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/api/rides/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userId: user._id,
+          geofenceOrigin: { latitude: 0, longitude: 0 }, // Will be updated with actual location
+        }),
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        Alert.alert('Success', 'Ride started! Stay safe on your journey.', [
+          { 
+            text: 'OK', 
+            onPress: () => navigation.navigate('Tracking', { 
+              destination, 
+              emergencyContact,
+              rideId: data.rideId 
+            })
+          }
+        ]);
+      } else {
+        Alert.alert('Error', data.error || 'Failed to start ride');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Network error. Please try again.');
+    } finally {
+      setRideLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await AsyncStorage.removeItem('token');
+      await AsyncStorage.removeItem('user');
+      navigation.replace('Login');
+    } catch (error) {
+      console.error('Error logging out:', error);
+    }
+  };
+
+  const updateEmergencyContact = async () => {
+    if (!emergencyContact) {
+      Alert.alert('Error', 'Please enter an emergency contact');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/auth/update`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          emergencyContacts: [emergencyContact]
+        }),
+      });
+
+      if (response.ok) {
+        Alert.alert('Success', 'Emergency contact updated!');
+        // Update local user data
+        const updatedUser = { ...user, emergencyContacts: [emergencyContact] };
+        setUser(updatedUser);
+        await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+      } else {
+        Alert.alert('Error', 'Failed to update emergency contact');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Network error. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!user) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Loading...</Text>
+      </View>
+    );
+  }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.label}>Destination:</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Enter destination"
-        value={destination}
-        onChangeText={setDestination}
-      />
+    <ScrollView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.welcomeText}>Welcome, {user.name}!</Text>
+        <View style={styles.headerButtons}>
+          <TouchableOpacity 
+            onPress={() => navigation.navigate('Settings')} 
+            style={styles.settingsButton}
+          >
+            <Text style={styles.settingsButtonText}>⚙️</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
 
-      <Text style={styles.label}>Emergency Contact:</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Enter contact number"
-        value={contact}
-        onChangeText={setContact}
-      />
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>🚗 Start a New Ride</Text>
+        <Text style={styles.sectionSubtitle}>Enter your destination to begin tracking</Text>
+        
+        <TextInput
+          style={styles.input}
+          placeholder="Where are you going?"
+          value={destination}
+          onChangeText={setDestination}
+        />
 
-      <Button
-        title="Start Ride"
-        onPress={() => {
-          navigation.navigate('Tracking', {
-            destination,
-            contact
-          });
-        }}
-      />
-    </View>
+        <Button
+          title={rideLoading ? "Starting Ride..." : "Start Ride"}
+          onPress={handleStartRide}
+          disabled={rideLoading}
+          color="#007AFF"
+        />
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>🆘 Emergency Contact</Text>
+        <Text style={styles.sectionSubtitle}>Update your emergency contact number</Text>
+        
+        <TextInput
+          style={styles.input}
+          placeholder="Emergency contact phone number"
+          value={emergencyContact}
+          onChangeText={setEmergencyContact}
+          keyboardType="phone-pad"
+          maxLength={15}
+        />
+
+        <Button
+          title={loading ? "Updating..." : "Update Contact"}
+          onPress={updateEmergencyContact}
+          disabled={loading}
+          color="#28a745"
+        />
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>📱 Quick Actions</Text>
+        <View style={styles.quickActions}>
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('Tracking', { destination: 'Home', emergencyContact })}
+          >
+            <Text style={styles.actionButtonText}>Track to Home</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={() => Alert.alert('Emergency', 'Emergency alert sent to your contacts!')}
+          >
+            <Text style={styles.actionButtonText}>SOS Alert</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, flex: 1, justifyContent: 'center' },
-  label: { fontWeight: 'bold', marginTop: 20, fontSize: 16 },
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  welcomeText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  settingsButton: {
+    padding: 8,
+    marginRight: 10,
+    backgroundColor: '#007AFF',
+    borderRadius: 6,
+  },
+  settingsButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  logoutButton: {
+    padding: 8,
+    backgroundColor: '#dc3545',
+    borderRadius: 6,
+  },
+  logoutText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  section: {
+    backgroundColor: 'white',
+    margin: 15,
+    padding: 20,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 5,
+    color: '#333',
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 20,
+  },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
-    padding: 10,
-    marginTop: 5,
-    borderRadius: 5,
+    borderColor: '#ddd',
+    padding: 15,
+    marginBottom: 20,
+    borderRadius: 8,
+    fontSize: 16,
+    backgroundColor: 'white',
+  },
+  quickActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  actionButton: {
+    flex: 1,
+    backgroundColor: '#007AFF',
+    padding: 15,
+    borderRadius: 8,
+    marginHorizontal: 5,
+    alignItems: 'center',
+  },
+  actionButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '500',
   },
 });

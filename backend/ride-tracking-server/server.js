@@ -5,14 +5,14 @@ const http = require("http");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const jwt = require("jsonwebtoken"); 
 
 // Import models & utils
-const User = require("./models/user"); // adjust path if needed
-const jwtUtil = require("./jwt");
+const User = require("../models/user"); // adjust path if needed
 
 // Import routes
-const authRoutes = require("./routes/auth");
-const rideRoutes = require("./routes/rides");
+const authRoutes = require("../routes/auth");
+const rideRoutes = require("../routes/rides");
 
 const app = express();
 const server = http.createServer(app);
@@ -21,9 +21,27 @@ const server = http.createServer(app);
 app.use(cors({ origin: "*", methods: ["GET", "POST"] }));
 app.use(express.json());
 
+// JWT verification middleware
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key', (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid token' });
+    }
+    req.user = user;
+    next();
+  });
+};
+
 // ---- routes
 app.use("/api/auth", authRoutes);
-app.use("/api/rides", rideRoutes);
+app.use("/api/rides", authenticateToken, rideRoutes);
 
 // Root route
 app.get("/", (_req, res) => {
