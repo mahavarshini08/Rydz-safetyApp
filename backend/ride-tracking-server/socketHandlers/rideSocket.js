@@ -1,7 +1,7 @@
 // backend/ride-tracking-server/socketHandlers/rideSocket.js
-const Ride = require("../models/Ride");
+const Ride = require('../../models/Ride');
 const User = require("../models/User");
-const { verifyToken } = require("../jwt");
+const { verifyToken } = require("../../utils/jwt");
 
 module.exports = (io) => {
   io.on("connection", (socket) => {
