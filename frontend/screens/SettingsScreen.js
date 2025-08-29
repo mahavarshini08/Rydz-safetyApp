@@ -79,7 +79,7 @@ export default function SettingsScreen({ navigation }) {
     }
   };
 
-  const addEmergencyContact = () => {
+  const addEmergencyContact = async () => {
     if (!newEmergencyContact) {
       Alert.alert('Error', 'Please enter a phone number');
       return;
@@ -90,13 +90,80 @@ export default function SettingsScreen({ navigation }) {
       return;
     }
 
-    setEmergencyContacts([...emergencyContacts, newEmergencyContact]);
+    const updatedContacts = [...emergencyContacts, newEmergencyContact];
+    setEmergencyContacts(updatedContacts);
     setNewEmergencyContact('');
+
+    // Save to database
+    await saveEmergencyContacts(updatedContacts);
   };
 
-  const removeEmergencyContact = (contact) => {
-    setEmergencyContacts(emergencyContacts.filter(c => c !== contact));
+  const removeEmergencyContact = async (contact) => {
+    const updatedContacts = emergencyContacts.filter(c => c !== contact);
+    setEmergencyContacts(updatedContacts);
+    
+    // Save to database
+    await saveEmergencyContacts(updatedContacts);
   };
+
+  const saveEmergencyContacts = async (contacts) => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/auth/update`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          emergencyContacts: contacts,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        await AsyncStorage.setItem('user', JSON.stringify(data.user));
+      } else {
+        Alert.alert('Error', 'Failed to save emergency contacts');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to save emergency contacts');
+    }
+  };
+
+  const saveAppPreferences = async () => {
+    try {
+      await AsyncStorage.setItem('appPreferences', JSON.stringify({
+        pushNotifications,
+        locationSharing,
+      }));
+    } catch (error) {
+      console.error('Failed to save app preferences:', error);
+    }
+  };
+
+  // Load app preferences on mount
+  useEffect(() => {
+    loadAppPreferences();
+  }, []);
+
+  const loadAppPreferences = async () => {
+    try {
+      const preferences = await AsyncStorage.getItem('appPreferences');
+      if (preferences) {
+        const prefs = JSON.parse(preferences);
+        setPushNotifications(prefs.pushNotifications ?? true);
+        setLocationSharing(prefs.locationSharing ?? true);
+      }
+    } catch (error) {
+      console.error('Failed to load app preferences:', error);
+    }
+  };
+
+  // Save preferences when they change
+  useEffect(() => {
+    saveAppPreferences();
+  }, [pushNotifications, locationSharing]);
 
   const handleLogout = async () => {
     Alert.alert(

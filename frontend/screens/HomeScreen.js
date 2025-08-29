@@ -5,6 +5,7 @@ import { API_URL } from '../config';
 
 export default function HomeScreen({ navigation }) {
   const [destination, setDestination] = useState('');
+  const [destinationCoords, setDestinationCoords] = useState(null);
   const [emergencyContact, setEmergencyContact] = useState('');
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState(null);
@@ -33,8 +34,8 @@ export default function HomeScreen({ navigation }) {
   };
 
   const handleStartRide = async () => {
-    if (!destination) {
-      Alert.alert('Error', 'Please enter your destination');
+    if (!destination || !destinationCoords) {
+      Alert.alert('Error', 'Please select your destination on the map');
       return;
     }
 
@@ -55,6 +56,8 @@ export default function HomeScreen({ navigation }) {
         },
         body: JSON.stringify({
           userId: user.id,
+          destination: destination,
+          destinationCoords: destinationCoords,
           geofenceOrigin: { latitude: 0, longitude: 0 }, // Will be updated with actual location
         }),
       });
@@ -66,6 +69,7 @@ export default function HomeScreen({ navigation }) {
             text: 'OK', 
             onPress: () => navigation.navigate('Tracking', { 
               destination, 
+              destinationCoords,
               emergencyContact,
               rideId: data.rideId 
             })
@@ -155,19 +159,37 @@ export default function HomeScreen({ navigation }) {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>🚗 Start a New Ride</Text>
-        <Text style={styles.sectionSubtitle}>Enter your destination to begin tracking</Text>
+        <Text style={styles.sectionSubtitle}>Select your destination on the map</Text>
         
-        <TextInput
-          style={styles.input}
-          placeholder="Where are you going?"
-          value={destination}
-          onChangeText={setDestination}
-        />
+        <TouchableOpacity
+          style={styles.mapButton}
+          onPress={() => navigation.navigate('MapPicker', {
+            onLocationSelect: (coords, address) => {
+              setDestination(address);
+              setDestinationCoords(coords);
+            }
+          })}
+        >
+          <Text style={styles.mapButtonText}>
+            {destination ? `📍 ${destination}` : '🗺️ Select Destination on Map'}
+          </Text>
+        </TouchableOpacity>
+
+        {destinationCoords && (
+          <View style={styles.destinationInfo}>
+            <Text style={styles.destinationLabel}>Selected Destination:</Text>
+            <Text style={styles.destinationText}>{destination}</Text>
+            <Text style={styles.coordsText}>
+              Lat: {destinationCoords.latitude.toFixed(6)}
+              {'\n'}Lng: {destinationCoords.longitude.toFixed(6)}
+            </Text>
+          </View>
+        )}
 
         <Button
           title={rideLoading ? "Starting Ride..." : "Start Ride"}
           onPress={handleStartRide}
-          disabled={rideLoading}
+          disabled={rideLoading || !destinationCoords}
           color="#007AFF"
         />
       </View>
@@ -317,5 +339,44 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '500',
+  },
+  mapButton: {
+    backgroundColor: '#e0e0e0',
+    padding: 15,
+    borderRadius: 8,
+    marginBottom: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mapButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+  },
+  coordsText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  destinationInfo: {
+    marginTop: 10,
+    padding: 10,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  destinationLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#555',
+    marginBottom: 5,
+  },
+  destinationText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 10,
   },
 });

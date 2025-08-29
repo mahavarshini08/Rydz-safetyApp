@@ -7,6 +7,7 @@ import SignUpScreen from './screens/SignUpScreen';
 import HomeScreen from './screens/HomeScreen';
 import TrackingScreen from './screens/TrackingScreen';
 import SettingsScreen from './screens/SettingsScreen';
+import MapPicker from './screens/MapPicker';
 
 const Stack = createNativeStackNavigator();
 
@@ -57,6 +58,14 @@ export default function App() {
           options={{ 
             title: 'Settings',
             headerShown: false,
+          }}
+        />
+        <Stack.Screen 
+          name="MapPicker" 
+          component={MapPicker} 
+          options={{ 
+            title: 'Select Destination',
+            headerShown: true,
           }}
         />
       </Stack.Navigator>

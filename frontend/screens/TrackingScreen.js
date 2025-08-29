@@ -1,7 +1,7 @@
 // frontend/screens/TrackingScreen.js
 import React, { useEffect, useState, useRef } from "react";
 import { View, StyleSheet, ActivityIndicator, Alert, Text, TouchableOpacity, Dimensions } from "react-native";
-import MapView, { Marker } from "react-native-maps";
+import MapView, { Marker, Polyline } from "react-native-maps";
 import * as Location from "expo-location";
 import io from "socket.io-client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -15,7 +15,9 @@ export default function TrackingScreen({ route, navigation }) {
   const [socket, setSocket] = useState(null);
   const [isTracking, setIsTracking] = useState(false);
   const [rideId, setRideId] = useState(null);
-  const { destination, emergencyContact, rideId: routeRideId } = route.params || {};
+  const [routePath, setRoutePath] = useState([]);
+  const [deviationAlert, setDeviationAlert] = useState(false);
+  const { destination, destinationCoords, emergencyContact, rideId: routeRideId } = route.params || {};
 
   useEffect(() => {
     let mounted = true;
@@ -40,6 +42,130 @@ export default function TrackingScreen({ route, navigation }) {
 
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    if (destinationCoords) {
+      setDest(destinationCoords);
+      // Generate a simple route path (in real app, use Google Directions API)
+      generateRoutePath();
+    }
+  }, [destinationCoords]);
+
+  const generateRoutePath = () => {
+    if (!currentLocation || !destinationCoords) return;
+    
+    // Simple straight line route (replace with Google Directions API for real routes)
+    const path = [
+      currentLocation,
+      destinationCoords
+    ];
+    setRoutePath(path);
+  };
+
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = lat1 * Math.PI / 180;
+    const φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distance in meters
+  };
+
+  const checkRouteDeviation = (currentPos) => {
+    if (routePath.length < 2) return false;
+    
+    // Find the closest point on the route
+    let minDistance = Infinity;
+    for (let i = 0; i < routePath.length - 1; i++) {
+      const start = routePath[i];
+      const end = routePath[i + 1];
+      
+      // Calculate distance from current position to line segment
+      const distance = distanceToLineSegment(
+        currentPos.latitude, currentPos.longitude,
+        start.latitude, start.longitude,
+        end.latitude, end.longitude
+      );
+      
+      if (distance < minDistance) {
+        minDistance = distance;
+      }
+    }
+    
+    // Alert if more than 100 meters from route
+    if (minDistance > 100 && !deviationAlert) {
+      setDeviationAlert(true);
+      sendEmergencyAlert(currentPos);
+    }
+    
+    return minDistance > 100;
+  };
+
+  const distanceToLineSegment = (px, py, x1, y1, x2, y2) => {
+    const A = px - x1;
+    const B = py - y1;
+    const C = x2 - x1;
+    const D = y2 - y1;
+
+    const dot = A * C + B * D;
+    const len_sq = C * C + D * D;
+    let param = -1;
+    
+    if (len_sq !== 0) param = dot / len_sq;
+
+    let xx, yy;
+    if (param < 0) {
+      xx = x1;
+      yy = y1;
+    } else if (param > 1) {
+      xx = x2;
+      yy = y2;
+    } else {
+      xx = x1 + param * C;
+      yy = y1 + param * D;
+    }
+
+    const dx = px - xx;
+    const dy = py - yy;
+    return Math.sqrt(dx * dx + dy * dy) * 111000; // Convert to meters
+  };
+
+  const sendEmergencyAlert = async (currentPos) => {
+    try {
+      const token = await AsyncStorage.getItem("token");
+      if (!token) return;
+
+      // Send emergency alert to backend
+      await fetch(`${API_URL}/api/rides/emergency`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          rideId: rideId,
+          currentLocation: currentPos,
+          destination: destination,
+          emergencyContact: emergencyContact,
+          deviation: true,
+        }),
+      });
+
+      Alert.alert(
+        "🚨 Route Deviation Detected!",
+        "You have deviated more than 100m from your planned route. Emergency contacts have been notified.",
+        [{ text: "OK" }]
+      );
+    } catch (error) {
+      console.error("Failed to send emergency alert:", error);
+    }
+  };
 
   useEffect(() => {
     // Connect socket
@@ -87,10 +213,15 @@ export default function TrackingScreen({ route, navigation }) {
               timestamp: loc.timestamp,
             };
             
-            setCurrentLocation({ 
+            const newLocation = { 
               latitude: loc.coords.latitude, 
               longitude: loc.coords.longitude 
-            });
+            };
+            
+            setCurrentLocation(newLocation);
+            
+            // Check for route deviation
+            checkRouteDeviation(newLocation);
             
             if (socket && socket.connected) {
               socket.emit("location_update", payload);
@@ -169,28 +300,47 @@ export default function TrackingScreen({ route, navigation }) {
     <View style={styles.container}>
       <MapView
         style={styles.map}
-        initialRegion={{
-          latitude: currentLocation.latitude,
-          longitude: currentLocation.longitude,
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        }}
+        initialRegion={
+          currentLocation
+            ? {
+                latitude: currentLocation.latitude,
+                longitude: currentLocation.longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+              }
+            : {
+                latitude: 37.78825,
+                longitude: -122.4324,
+                latitudeDelta: 0.0922,
+                longitudeDelta: 0.0421,
+              }
+        }
         showsUserLocation={true}
         showsMyLocationButton={true}
         showsCompass={true}
       >
-        <Marker 
-          coordinate={currentLocation} 
-          title="You" 
-          description="Current location"
-          pinColor="#007AFF"
-        />
-        {destination && (
-          <Marker 
-            coordinate={dest} 
-            title="Destination" 
+        {currentLocation && (
+          <Marker
+            coordinate={currentLocation}
+            title="Your Location"
+            description="You are here"
+            pinColor="blue"
+          />
+        )}
+        {dest && (
+          <Marker
+            coordinate={dest}
+            title="Destination"
             description={destination}
-            pinColor="#28a745"
+            pinColor="red"
+          />
+        )}
+        {routePath.length > 1 && (
+          <Polyline
+            coordinates={routePath}
+            strokeColor="#007AFF"
+            strokeWidth={3}
+            lineDashPattern={[1]}
           />
         )}
       </MapView>

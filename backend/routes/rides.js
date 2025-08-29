@@ -70,4 +70,45 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+// Emergency alert route
+router.post("/emergency", async (req, res) => {
+  try {
+    const { rideId, currentLocation, destination, emergencyContact, deviation } = req.body;
+    const { userId } = req.user;
+
+    if (!rideId || !currentLocation || !emergencyContact) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // Log the emergency alert
+    console.log("🚨 EMERGENCY ALERT:", {
+      rideId,
+      userId,
+      currentLocation,
+      destination,
+      emergencyContact,
+      deviation,
+      timestamp: new Date().toISOString()
+    });
+
+    // TODO: Implement actual emergency notification system
+    // This could include:
+    // - SMS to emergency contacts
+    // - Push notifications
+    // - Email alerts
+    // - Integration with emergency services
+
+    // For now, just log and acknowledge
+    res.json({ 
+      message: "Emergency alert received and logged",
+      alertId: `alert-${Date.now()}`,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (err) {
+    console.error("Emergency alert error:", err);
+    res.status(500).json({ error: "Failed to process emergency alert" });
+  }
+});
+
 module.exports = router;
