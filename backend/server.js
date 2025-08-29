@@ -1,18 +1,21 @@
-// backend/server.js
+// Main server file
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-const mongoose = require("mongoose");
 const cors = require("cors");
 const jwt = require("jsonwebtoken"); 
 
-// Import models & utils
-const User = require("../models/user"); // adjust path if needed
+// Import Firebase config
+const { db } = require("./firebase-config");
+
+// Import models
+const User = require("./models/user");
+const Ride = require("./models/Ride");
 
 // Import routes
-const authRoutes = require("../routes/auth");
-const rideRoutes = require("../routes/rides");
+const authRoutes = require("./routes/auth");
+const rideRoutes = require("./routes/rides");
 
 const app = express();
 const server = http.createServer(app);
@@ -111,12 +114,8 @@ app.post("/locations", (req, res) => {
   res.json({ ok: true, id });
 });
 
-// ---- MongoDB
-const MONGO = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/rydz";
-mongoose
-  .connect(MONGO, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => console.log("✅ Mongo connected"))
-  .catch((err) => console.error("❌ Mongo connection error", err));
+// ---- Firebase
+console.log("✅ Firebase initialized");
 
 // ---- start server
 const PORT = process.env.PORT || 4000;

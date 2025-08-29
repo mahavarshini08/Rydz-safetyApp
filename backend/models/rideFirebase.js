@@ -1,5 +1,5 @@
 // Firebase-based Ride model
-const { db, admin } = require('../firebase-config');
+const { db, admin } = require('../ride-tracking-server/firebase-config');
 
 class Ride {
   constructor(data) {

@@ -1,31 +1,23 @@
 # 🚗 Rydz Safety App
 
-A ride safety application with real-time location tracking, emergency contacts, and JWT authentication.
+A ride safety application with real-time location tracking, emergency contacts, and JWT authentication, powered by Firebase.
 
 ## 📁 Project Structure
 
 ```
 Rydz-safetyApp/
 ├── backend/
-│   ├── models/
-│   │   ├── user.js          # User model with phone, name, emergency contacts
-│   │   └── Ride.js          # Ride tracking model
-│   ├── routes/
-│   │   ├── auth.js          # Authentication routes (login/register)
-│   │   └── rides.js         # Ride management routes
-│   ├── ride-tracking-server/
-│   │   ├── server.js        # Main server with Socket.IO
-│   │   ├── .env             # Environment variables
-│   │   └── package.json     # Server dependencies
-│   └── package.json         # Backend dependencies
-├── frontend/
-│   ├── screens/
-│   │   ├── LoginScreen.js   # User login
-│   │   ├── SignUpScreen.js  # User registration
-│   │   ├── HomeScreen.js    # Main dashboard
-│   │   └── TrackingScreen.js # Real-time tracking
-│   ├── config.js            # API configuration
-│   └── package.json         # Frontend dependencies
+│   ├── models/          # Firebase models (User, Ride)
+│   ├── routes/          # API routes (auth, rides)
+│   ├── utils/           # JWT utilities
+│   ├── server.js        # Main server with Socket.IO
+│   ├── firebase-config.js # Firebase configuration
+│   └── test-firebase.js # Firebase connection test
+├── frontend/            # React Native app
+│   ├── screens/         # App screens
+│   ├── components/      # Reusable components
+│   └── utils/           # Frontend utilities
+├── package.json         # Single package file
 └── README.md
 ```
 
@@ -33,58 +25,62 @@ Rydz-safetyApp/
 
 ### Prerequisites
 - Node.js (v16 or higher)
-- MongoDB (running on localhost:27017)
+- Firebase project (created at [Firebase Console](https://console.firebase.google.com/))
 - Expo CLI (for frontend)
 
-### 1. Backend Setup
+### 1. Install Dependencies
 
 ```bash
-cd backend/ride-tracking-server
-
-# Install dependencies
-npm install
-
-# Create .env file (already created)
-# MONGO_URI=mongodb://127.0.0.1:27017/rydz
-# JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
-# PORT=4000
-
-# Test the setup
-node test-server.js
-
-# Start the server
-npm start
+npm run install:all
 ```
 
-### 2. Frontend Setup
+### 2. Firebase Setup
+
+1. **Download Firebase Service Account Key:**
+   - Go to your Firebase project console
+   - Navigate to **Project Settings** → **Service Accounts**
+   - Click **"Generate New Private Key"**
+   - Save as `backend/serviceAccountKey.json`
+
+2. **Create Environment File:**
+   Create `backend/.env` with:
+   ```env
+   FIREBASE_DATABASE_URL=https://your-project-id.firebaseio.com
+   JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+   PORT=4000
+   ```
+
+### 3. Test Firebase Connection
 
 ```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Start Expo development server
-npm start
+npm test
 ```
 
-### 3. MongoDB Setup
+### 4. Start Backend Server
 
-Make sure MongoDB is running:
 ```bash
-# Start MongoDB (Windows)
-mongod
+npm start
+# or for development with auto-restart:
+npm run dev
+```
 
-# Or if using MongoDB as a service
-net start MongoDB
+### 5. Start Frontend (in new terminal)
+
+```bash
+npm run frontend
 ```
 
 ## 🔧 Configuration
 
 ### Backend Configuration (.env)
 ```env
-MONGO_URI=mongodb://127.0.0.1:27017/rydz
+# Firebase Configuration
+FIREBASE_DATABASE_URL=https://your-project-id.firebaseio.com
+
+# JWT Configuration
 JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+
+# Server Configuration
 PORT=4000
 ```
 
@@ -129,34 +125,35 @@ Authorization: Bearer <your-jwt-token>
 - **Ride History**: Track and store ride data
 - **Geofencing**: Define safe zones for rides
 - **Push Notifications**: Alert system for safety
+- **Firebase Integration**: Scalable cloud database
 
 ## 🐛 Troubleshooting
 
 ### Common Issues
 
-1. **MongoDB Connection Failed**
-   - Ensure MongoDB is running on port 27017
-   - Check if the database "rydz" exists
+1. **Firebase Connection Failed**
+   - Ensure `serviceAccountKey.json` exists in `backend/` folder
+   - Verify Firebase project ID in `.env` file
+   - Check service account permissions
 
 2. **Port Already in Use**
-   - Change PORT in .env file
+   - Change PORT in `.env` file
    - Kill processes using port 4000
 
 3. **Frontend Can't Connect to Backend**
-   - Verify IP address in frontend/config.js
+   - Verify IP address in `frontend/config.js`
    - Check if backend server is running
    - Ensure firewall allows connections
 
 4. **JWT Token Issues**
-   - Check JWT_SECRET in .env file
+   - Check JWT_SECRET in `.env` file
    - Verify token format in Authorization header
 
 ### Testing
 
-Run the test script to verify setup:
+Run the Firebase test script to verify setup:
 ```bash
-cd backend/ride-tracking-server
-node test-server.js
+npm test
 ```
 
 ## 📝 Development Notes
@@ -165,7 +162,9 @@ node test-server.js
 - Socket.IO is integrated with the main server
 - JWT tokens expire in 7 days
 - Location updates are stored in memory (not persistent)
-- Emergency contacts are stored in User model
+- Emergency contacts are stored in Firebase User collection
+- All data is stored in Firebase Firestore
+- Single package.json for easy dependency management
 
 ## 🔒 Security Notes
 
@@ -174,12 +173,21 @@ node test-server.js
 - Add HTTPS in production
 - Validate all input data
 - Implement proper error handling
+- Review Firebase security rules
 
 ## 📞 Support
 
 If you encounter issues:
 1. Check the console logs
 2. Verify all dependencies are installed
-3. Ensure MongoDB is running
+3. Ensure Firebase is properly configured
 4. Check network connectivity
 5. Verify IP addresses in configuration
+
+## 🚀 Available Scripts
+
+- `npm start` - Start backend server
+- `npm run dev` - Start backend with auto-restart
+- `npm test` - Test Firebase connection
+- `npm run frontend` - Start frontend app
+- `npm run install:all` - Install all dependencies

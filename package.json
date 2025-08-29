@@ -1,0 +1,28 @@
+{
+  "name": "rydz-safety-app",
+  "version": "1.0.0",
+  "description": "Ride safety application with real-time location tracking",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "nodemon backend/server.js",
+    "test": "node backend/test-firebase.js",
+    "frontend": "cd frontend && npm start",
+    "install:all": "npm install && cd frontend && npm install",
+    "build": "cd frontend && npm run build"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.0",
+    "express": "^4.18.2",
+    "firebase-admin": "^13.4.0",
+    "jsonwebtoken": "^9.0.2",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  },
+  "keywords": ["ride-safety", "location-tracking", "firebase", "socket.io"],
+  "author": "Your Name",
+  "license": "MIT"
+}
