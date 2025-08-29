@@ -28,6 +28,3 @@ Desktop.ini
 # typescript
 *.tsbuildinfo
 
-# Firebase
-serviceAccountKey.json
-.env
