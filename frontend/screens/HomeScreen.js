@@ -54,7 +54,7 @@ export default function HomeScreen({ navigation }) {
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          userId: user._id,
+          userId: user.id,
           geofenceOrigin: { latitude: 0, longitude: 0 }, // Will be updated with actual location
         }),
       });

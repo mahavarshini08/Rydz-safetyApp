@@ -13,11 +13,10 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ error: "Name and phone are required" });
     }
 
-    const existing = await User.findOne({ phone });
+    const existing = await User.findByPhone(phone);
     if (existing) return res.status(400).json({ error: "User already exists" });
 
-    const user = new User({ name, phone, emergencyContacts: emergencyContacts || [] });
-    await user.save();
+    const user = await User.create({ name, phone, emergencyContacts: emergencyContacts || [] });
 
     res.json({ message: "User registered", user });
   } catch (err) {
@@ -33,11 +32,11 @@ router.post("/login", async (req, res) => {
 
     if (!phone) return res.status(400).json({ error: "Phone is required" });
 
-    const user = await User.findOne({ phone });
+    const user = await User.findByPhone(phone);
     if (!user) return res.status(404).json({ error: "User not found" });
 
     // Generate JWT token
-    const token = jwt.sign({ userId: user._id, phone: user.phone }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '7d' });
+    const token = jwt.sign({ userId: user.id, phone: user.phone }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '7d' });
 
     res.json({ message: "Login successful", user, token });
   } catch (err) {
@@ -56,12 +55,13 @@ router.put("/update", async (req, res) => {
     if (!user) return res.status(404).json({ error: "User not found" });
 
     // Update fields if provided
-    if (name) user.name = name;
-    if (phone) user.phone = phone;
-    if (emergencyContacts) user.emergencyContacts = emergencyContacts;
-    if (pushToken) user.pushToken = pushToken;
+    const updateData = {};
+    if (name) updateData.name = name;
+    if (phone) updateData.phone = phone;
+    if (emergencyContacts) updateData.emergencyContacts = emergencyContacts;
+    if (pushToken) updateData.pushToken = pushToken;
 
-    await user.save();
+    await User.update(userId, updateData);
 
     res.json({ message: "Profile updated successfully", user });
   } catch (err) {
@@ -75,7 +75,7 @@ router.get("/profile", async (req, res) => {
   try {
     const { userId } = req.user; // From JWT middleware
 
-    const user = await User.findById(userId).select('-__v');
+    const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: "User not found" });
 
     res.json({ user });

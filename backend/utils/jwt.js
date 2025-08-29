@@ -9,7 +9,7 @@ if (!SECRET) {
 }
 
 function generateToken(user) {
-  return jwt.sign({ id: user._id }, SECRET, { expiresIn: "7d" });
+  return jwt.sign({ id: user.id }, SECRET, { expiresIn: "7d" });
 }
 
 function verifyToken(token) {
