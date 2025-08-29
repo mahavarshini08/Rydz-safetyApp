@@ -12,7 +12,8 @@ import {
   Switch
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_URL } from '../config';
+import { doc, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
+import { auth, db } from '../firebase';
 
 export default function SettingsScreen({ navigation }) {
   const [user, setUser] = useState(null);
@@ -44,44 +45,39 @@ export default function SettingsScreen({ navigation }) {
   };
 
   const updateProfile = async () => {
-    if (!name || !phone) {
-      Alert.alert('Error', 'Name and phone are required');
+    if (!name || !auth.currentUser) {
+      Alert.alert('Error', 'Name is required and you must be logged in');
       return;
     }
 
     setLoading(true);
     try {
-      const token = await AsyncStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/auth/update`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          name,
-          phone,
-          emergencyContacts,
-        }),
-      });
+      const userRef = doc(db, "users", auth.currentUser.uid);
+      
+      const updateData = {};
+      if (name) updateData.name = name;
+      if (phone) updateData.phone = phone;
+      if (emergencyContacts) updateData.emergencyContacts = emergencyContacts;
 
-      if (response.ok) {
-        const data = await response.json();
-        await AsyncStorage.setItem('user', JSON.stringify(data.user));
-        Alert.alert('Success', 'Profile updated successfully!');
-      } else {
-        Alert.alert('Error', 'Failed to update profile');
-      }
+      await updateDoc(userRef, updateData);
+
+      // Update local storage
+      const updatedUser = { ...user, ...updateData };
+      await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+      setUser(updatedUser);
+
+      Alert.alert('Success', 'Profile updated successfully!');
     } catch (error) {
-      Alert.alert('Error', 'Network error. Please try again.');
+      console.error('Update error:', error);
+      Alert.alert('Error', 'Failed to update profile');
     } finally {
       setLoading(false);
     }
   };
 
   const addEmergencyContact = async () => {
-    if (!newEmergencyContact) {
-      Alert.alert('Error', 'Please enter a phone number');
+    if (!newEmergencyContact || !auth.currentUser) {
+      Alert.alert('Error', 'Please enter a phone number and ensure you are logged in');
       return;
     }
 
@@ -90,44 +86,49 @@ export default function SettingsScreen({ navigation }) {
       return;
     }
 
-    const updatedContacts = [...emergencyContacts, newEmergencyContact];
-    setEmergencyContacts(updatedContacts);
-    setNewEmergencyContact('');
+    try {
+      const userRef = doc(db, "users", auth.currentUser.uid);
+      await updateDoc(userRef, {
+        emergencyContacts: arrayUnion(newEmergencyContact)
+      });
 
-    // Save to database
-    await saveEmergencyContacts(updatedContacts);
+      const updatedContacts = [...emergencyContacts, newEmergencyContact];
+      setEmergencyContacts(updatedContacts);
+      setNewEmergencyContact('');
+
+      // Update local storage
+      const updatedUser = { ...user, emergencyContacts: updatedContacts };
+      await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+      setUser(updatedUser);
+
+      Alert.alert('Success', 'Emergency contact added!');
+    } catch (error) {
+      console.error('Add contact error:', error);
+      Alert.alert('Error', 'Failed to add emergency contact');
+    }
   };
 
   const removeEmergencyContact = async (contact) => {
-    const updatedContacts = emergencyContacts.filter(c => c !== contact);
-    setEmergencyContacts(updatedContacts);
-    
-    // Save to database
-    await saveEmergencyContacts(updatedContacts);
-  };
+    if (!auth.currentUser) return;
 
-  const saveEmergencyContacts = async (contacts) => {
     try {
-      const token = await AsyncStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/auth/update`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          emergencyContacts: contacts,
-        }),
+      const userRef = doc(db, "users", auth.currentUser.uid);
+      await updateDoc(userRef, {
+        emergencyContacts: arrayRemove(contact)
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        await AsyncStorage.setItem('user', JSON.stringify(data.user));
-      } else {
-        Alert.alert('Error', 'Failed to save emergency contacts');
-      }
+      const updatedContacts = emergencyContacts.filter(c => c !== contact);
+      setEmergencyContacts(updatedContacts);
+
+      // Update local storage
+      const updatedUser = { ...user, emergencyContacts: updatedContacts };
+      await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+      setUser(updatedUser);
+
+      Alert.alert('Success', 'Emergency contact removed!');
     } catch (error) {
-      Alert.alert('Error', 'Failed to save emergency contacts');
+      console.error('Remove contact error:', error);
+      Alert.alert('Error', 'Failed to remove emergency contact');
     }
   };
 
@@ -176,7 +177,6 @@ export default function SettingsScreen({ navigation }) {
           style: 'destructive',
           onPress: async () => {
             try {
-              await AsyncStorage.removeItem('token');
               await AsyncStorage.removeItem('user');
               navigation.replace('Login');
             } catch (error) {

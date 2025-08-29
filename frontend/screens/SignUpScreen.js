@@ -1,47 +1,61 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import { API_URL } from '../config';
+import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore";
+import { auth, db } from '../firebase';
 
 export default function SignUpScreen({ navigation }) {
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [emergencyContact, setEmergencyContact] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSignup = async () => {
-    if (!name || !phone) {
-      Alert.alert('Error', 'Name and phone are required');
+    if (!name || !email || !password) {
+      Alert.alert('Error', 'Name, email and password are required');
       return;
     }
 
-    // Basic phone validation
-    if (phone.length < 10) {
-      Alert.alert('Error', 'Please enter a valid phone number');
+    if (password.length < 6) {
+      Alert.alert('Error', 'Password must be at least 6 characters');
       return;
     }
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          name, 
-          phone, 
-          emergencyContacts: emergencyContact ? [emergencyContact] : [] 
-        }),
+      // Create user with Firebase Auth
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // Update display name
+      await updateProfile(user, { displayName: name });
+
+      // Save user profile in Firestore
+      await setDoc(doc(db, "users", user.uid), {
+        name: name,
+        email: email,
+        phone: '', // You can add phone field later
+        emergencyContacts: emergencyContact ? [emergencyContact] : [],
+        createdAt: new Date().toISOString()
       });
 
-      const data = await response.json();
-      if (response.ok) {
-        Alert.alert('Success', 'Account created successfully! Please login.', [
-          { text: 'OK', onPress: () => navigation.replace('Login') }
-        ]);
-      } else {
-        Alert.alert('Error', data.error || 'Registration failed');
-      }
+      Alert.alert('Success', 'Account created successfully!', [
+        { text: 'OK', onPress: () => navigation.replace('Login') }
+      ]);
     } catch (error) {
-      Alert.alert('Error', 'Network error. Please check your connection and try again.');
+      console.error('Signup error:', error);
+      let errorMessage = 'Registration failed';
+      
+      if (error.code === 'auth/email-already-in-use') {
+        errorMessage = 'Email already exists. Please use a different email.';
+      } else if (error.code === 'auth/weak-password') {
+        errorMessage = 'Password is too weak. Please use a stronger password.';
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = 'Invalid email address.';
+      }
+      
+      Alert.alert('Error', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -62,11 +76,20 @@ export default function SignUpScreen({ navigation }) {
       
       <TextInput 
         style={styles.input} 
-        placeholder="Phone Number" 
-        onChangeText={setPhone} 
-        value={phone}
-        keyboardType="phone-pad"
-        maxLength={15}
+        placeholder="Email Address" 
+        onChangeText={setEmail} 
+        value={email}
+        keyboardType="email-address"
+        autoCapitalize="none"
+      />
+      
+      <TextInput 
+        style={styles.input} 
+        placeholder="Password (min 6 characters)" 
+        onChangeText={setPassword} 
+        value={password}
+        secureTextEntry
+        autoCapitalize="none"
       />
       
       <TextInput 

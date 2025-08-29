@@ -19,6 +19,7 @@
     "expo-sms": "~13.1.4",
     "expo-status-bar": "~2.2.3",
     "expo-task-manager": "~13.1.6",
+    "firebase": "^12.2.1",
     "geolib": "^3.3.4",
     "react": "19.0.0",
     "react-native": "0.79.5",
@@ -30,8 +31,8 @@
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
-    "typescript": "~5.8.3",
-    "@types/react": "~19.0.10"
+    "@types/react": "~19.0.10",
+    "typescript": "~5.8.3"
   },
   "private": true
 }

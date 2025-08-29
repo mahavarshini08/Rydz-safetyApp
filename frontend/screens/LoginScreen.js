@@ -1,43 +1,61 @@
 // frontend/screens/LoginScreen.js
-import React, { useState } from "react";
-import { View, Text, TextInput, Button, StyleSheet, Alert, ActivityIndicator } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { API_URL } from "../config";
+import React, { useState } from 'react';
+import { View, Text, TextInput, Button, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { auth, db } from '../firebase';
 
 export default function LoginScreen({ navigation }) {
-  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
-    if (!phone) {
-      Alert.alert("Error", "Please enter your phone number");
-      return;
-    }
-
-    // Basic phone validation
-    if (phone.length < 10) {
-      Alert.alert("Error", "Please enter a valid phone number");
+    if (!email || !password) {
+      Alert.alert('Error', 'Email and password are required');
       return;
     }
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone }),
-      });
+      // Sign in with Firebase Auth
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // Get user profile from Firestore
+      const userDoc = await getDoc(doc(db, "users", user.uid));
       
-      const data = await res.json();
-      if (data.token) {
-        await AsyncStorage.setItem("token", data.token);
-        await AsyncStorage.setItem("user", JSON.stringify(data.user));
-        navigation.replace("Home");
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        
+        // Store user data locally
+        await AsyncStorage.setItem('user', JSON.stringify({
+          id: user.uid,
+          name: userData.name,
+          email: userData.email,
+          phone: userData.phone || '',
+          emergencyContacts: userData.emergencyContacts || []
+        }));
+
+        // Navigate to home
+        navigation.replace('Home');
       } else {
-        Alert.alert("Login Failed", data.error || "Please check your credentials");
+        Alert.alert('Error', 'User profile not found');
       }
-    } catch (err) {
-      Alert.alert("Network Error", "Please check your connection and try again");
+    } catch (error) {
+      console.error('Login error:', error);
+      let errorMessage = 'Login failed';
+      
+      if (error.code === 'auth/user-not-found') {
+        errorMessage = 'No account found with this email.';
+      } else if (error.code === 'auth/wrong-password') {
+        errorMessage = 'Incorrect password.';
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = 'Invalid email address.';
+      }
+      
+      Alert.alert('Error', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -46,15 +64,24 @@ export default function LoginScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Welcome Back</Text>
-      <Text style={styles.subtitle}>Login to your Rydz Safety account</Text>
+      <Text style={styles.subtitle}>Sign in to your Rydz Safety account</Text>
       
-      <TextInput
-        style={styles.input}
-        placeholder="Phone Number"
-        keyboardType="phone-pad"
-        onChangeText={setPhone}
-        value={phone}
-        maxLength={15}
+      <TextInput 
+        style={styles.input} 
+        placeholder="Email Address" 
+        onChangeText={setEmail} 
+        value={email}
+        keyboardType="email-address"
+        autoCapitalize="none"
+      />
+      
+      <TextInput 
+        style={styles.input} 
+        placeholder="Password" 
+        onChangeText={setPassword} 
+        value={password}
+        secureTextEntry
+        autoCapitalize="none"
       />
       
       <View style={styles.buttonContainer}>
@@ -69,7 +96,7 @@ export default function LoginScreen({ navigation }) {
         )}
       </View>
       
-      <Text style={styles.link} onPress={() => navigation.navigate("Signup")}>
+      <Text style={styles.link} onPress={() => navigation.navigate('Signup')}>
         Don't have an account? Sign up
       </Text>
     </View>

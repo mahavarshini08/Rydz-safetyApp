@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, Alert, ActivityIndicator, ScrollView, TouchableOpacity } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../config';
+import { collection, addDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { auth } from '../firebase';
 
 export default function HomeScreen({ navigation }) {
   const [destination, setDestination] = useState('');
@@ -41,45 +44,37 @@ export default function HomeScreen({ navigation }) {
 
     setRideLoading(true);
     try {
-      const token = await AsyncStorage.getItem('token');
-      if (!token) {
+      if (!auth.currentUser) {
         Alert.alert('Error', 'Please login again');
         navigation.replace('Login');
         return;
       }
 
-      const response = await fetch(`${API_URL}/api/rides/start`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          userId: user.id,
-          destination: destination,
-          destinationCoords: destinationCoords,
-          geofenceOrigin: { latitude: 0, longitude: 0 }, // Will be updated with actual location
-        }),
+      // Create ride document in Firestore
+      const rideRef = await addDoc(collection(db, "rides"), {
+        userId: auth.currentUser.uid,
+        destination: destination,
+        destinationCoords: destinationCoords,
+        startTime: new Date().toISOString(),
+        status: 'active',
+        emergencyContacts: user.emergencyContacts || [],
+        createdAt: new Date().toISOString()
       });
 
-      const data = await response.json();
-      if (response.ok) {
-        Alert.alert('Success', 'Ride started! Stay safe on your journey.', [
-          { 
-            text: 'OK', 
-            onPress: () => navigation.navigate('Tracking', { 
-              destination, 
-              destinationCoords,
-              emergencyContact,
-              rideId: data.rideId 
-            })
-          }
-        ]);
-      } else {
-        Alert.alert('Error', data.error || 'Failed to start ride');
-      }
+      Alert.alert('Success', 'Ride started! Stay safe on your journey.', [
+        { 
+          text: 'OK', 
+          onPress: () => navigation.navigate('Tracking', { 
+            destination, 
+            destinationCoords,
+            emergencyContact: user.emergencyContacts?.[0] || '',
+            rideId: rideRef.id 
+          })
+        }
+      ]);
     } catch (error) {
-      Alert.alert('Error', 'Network error. Please try again.');
+      console.error('Start ride error:', error);
+      Alert.alert('Error', 'Failed to start ride. Please try again.');
     } finally {
       setRideLoading(false);
     }
