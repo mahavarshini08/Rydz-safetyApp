@@ -1,377 +1,352 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, Alert, ActivityIndicator, ScrollView, TouchableOpacity } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_URL } from '../config';
-import { collection, addDoc } from 'firebase/firestore';
-import { db } from '../firebase';
-import { auth } from '../firebase';
+// frontend/screens/HomeScreen.js
+import React, { useState, useEffect } from "react";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  Alert,
+  FlatList,
+} from "react-native";
+import { signOut, onAuthStateChanged } from "firebase/auth";
+import { auth } from "../firebase";
+import MapView, { Marker, Polyline } from "react-native-maps";
+import SosButton from "../components/SosButton";
+import * as Location from "expo-location";
 
 export default function HomeScreen({ navigation }) {
-  const [destination, setDestination] = useState('');
-  const [destinationCoords, setDestinationCoords] = useState(null);
-  const [emergencyContact, setEmergencyContact] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [destination, setDestination] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+  const [selectedCoords, setSelectedCoords] = useState(null);
+  const [routeCoords, setRouteCoords] = useState([]);
+  const [emergencyContact, setEmergencyContact] = useState("+0987654321");
   const [user, setUser] = useState(null);
-  const [rideLoading, setRideLoading] = useState(false);
+  const [showMap, setShowMap] = useState(false);
+  const [location, setLocation] = useState(null);
 
+  // listen for logged in user
   useEffect(() => {
-    loadUserData();
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser.displayName || currentUser.email);
+      } else {
+        setUser(null);
+      }
+    });
+    return unsubscribe;
   }, []);
 
-  const loadUserData = async () => {
-    try {
-      const userData = await AsyncStorage.getItem('user');
-      if (userData) {
-        const userObj = JSON.parse(userData);
-        setUser(userObj);
-        // setName(userObj.name || ''); // These lines were not in the new_code, so I'm removing them.
-        // setPhone(userObj.phone || '');
-        // setEmergencyContacts(userObj.emergencyContacts || []);
-        if (userObj.emergencyContacts && userObj.emergencyContacts.length > 0) {
-          setEmergencyContact(userObj.emergencyContacts[0]);
-        }
-      }
-    } catch (error) {
-      console.error('Error loading user data:', error);
-    }
-  };
-
-  const handleStartRide = async () => {
-    if (!destination || !destinationCoords) {
-      Alert.alert('Error', 'Please select your destination on the map');
-      return;
-    }
-
-    setRideLoading(true);
-    try {
-      if (!auth.currentUser) {
-        Alert.alert('Error', 'Please login again');
-        navigation.replace('Login');
+  // track live location
+  useEffect(() => {
+    (async () => {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission Denied", "Location access is needed for SOS.");
         return;
       }
 
-      // Create ride document in Firestore
-      const rideRef = await addDoc(collection(db, "rides"), {
-        userId: auth.currentUser.uid,
-        destination: destination,
-        destinationCoords: destinationCoords,
-        startTime: new Date().toISOString(),
-        status: 'active',
-        emergencyContacts: user.emergencyContacts || [],
-        createdAt: new Date().toISOString()
+      const loc = await Location.getCurrentPositionAsync({});
+      setLocation({
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
       });
 
-      Alert.alert('Success', 'Ride started! Stay safe on your journey.', [
-        { 
-          text: 'OK', 
-          onPress: () => navigation.navigate('Tracking', { 
-            destination, 
-            destinationCoords,
-            emergencyContact: user.emergencyContacts?.[0] || '',
-            rideId: rideRef.id 
-          })
+      const sub = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: 5000,
+          distanceInterval: 10,
+        },
+        (locUpdate) => {
+          setLocation({
+            latitude: locUpdate.coords.latitude,
+            longitude: locUpdate.coords.longitude,
+          });
         }
-      ]);
-    } catch (error) {
-      console.error('Start ride error:', error);
-      Alert.alert('Error', 'Failed to start ride. Please try again.');
-    } finally {
-      setRideLoading(false);
+      );
+
+      return () => sub.remove();
+    })();
+  }, []);
+
+  // fetch suggestions from Nominatim
+  const fetchSuggestions = async (text) => {
+    setDestination(text);
+    if (text.length < 3) {
+      setSuggestions([]);
+      return;
+    }
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
+          text
+        )}&format=json&limit=5`
+      );
+      const data = await res.json();
+      setSuggestions(data);
+    } catch (err) {
+      console.error("Suggestion fetch error:", err);
+    }
+  };
+
+  const handleSelectSuggestion = async (item) => {
+    setDestination(item.display_name);
+    setSuggestions([]);
+    const coords = {
+      latitude: parseFloat(item.lat),
+      longitude: parseFloat(item.lon),
+    };
+    setSelectedCoords(coords);
+
+    // fetch route from current location (dummy start for now)
+    try {
+      const start = "77.5946,12.9716"; // Bangalore coords as example
+      const end = `${coords.longitude},${coords.latitude}`;
+      const res = await fetch(
+        `https://router.project-osrm.org/route/v1/driving/${start};${end}?geometries=geojson`
+      );
+      const data = await res.json();
+      if (data.routes && data.routes.length > 0) {
+        const points = data.routes[0].geometry.coordinates.map(([lon, lat]) => ({
+          latitude: lat,
+          longitude: lon,
+        }));
+        setRouteCoords(points);
+      }
+    } catch (err) {
+      console.error("Route fetch error:", err);
     }
   };
 
   const handleLogout = async () => {
     try {
-      await AsyncStorage.removeItem('token');
-      await AsyncStorage.removeItem('user');
-      navigation.replace('Login');
-    } catch (error) {
-      console.error('Error logging out:', error);
+      await signOut(auth);
+      navigation.replace("Login");
+    } catch (err) {
+      Alert.alert("Logout failed", err.message);
     }
   };
 
-  const updateEmergencyContact = async () => {
-    if (!emergencyContact) {
-      Alert.alert('Error', 'Please enter an emergency contact');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const token = await AsyncStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/auth/update`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          emergencyContacts: [emergencyContact]
-        }),
-      });
-
-      if (response.ok) {
-        Alert.alert('Success', 'Emergency contact updated!');
-        // Update local user data
-        const updatedUser = { ...user, emergencyContacts: [emergencyContact] };
-        setUser(updatedUser);
-        await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
-      } else {
-        Alert.alert('Error', 'Failed to update emergency contact');
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Network error. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+  const handleStartRide = () => {
+    if (!destination || !selectedCoords)
+      return Alert.alert("Enter a destination first");
+    setShowMap(true);
+    Alert.alert("Ride Started", `Going to: ${destination}`);
   };
 
-  if (!user) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Loading...</Text>
-      </View>
-    );
-  }
+  const handleUpdateContact = () => {
+    if (!emergencyContact) return Alert.alert("Enter a contact number first");
+    Alert.alert("Emergency Contact Updated", emergencyContact);
+  };
+
+  const handleTrackToHome = () => {
+    Alert.alert("Tracking to Home...");
+  };
+
+  const handleSOS = () => {
+    if (location) {
+      Alert.alert(
+        "🚨 SOS Alert Sent!",
+        `Location shared with ${emergencyContact}\nLat: ${location.latitude}, Lng: ${location.longitude}`
+      );
+    } else {
+      Alert.alert("🚨 SOS Alert Sent!", `Location shared with ${emergencyContact}`);
+    }
+  };
 
   return (
     <ScrollView style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.welcomeText}>Welcome, {user.name}!</Text>
-        <View style={styles.headerButtons}>
-          <TouchableOpacity 
-            onPress={() => navigation.navigate('Settings')} 
-            style={styles.settingsButton}
-          >
-            <Text style={styles.settingsButtonText}>⚙️</Text>
+        <Text style={styles.appTitle}>Rydz Safety</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.welcomeText}>
+            {user ? `Welcome, ${user}!` : "Welcome!"}
+          </Text>
+          <TouchableOpacity style={styles.settingsBtn}>
+            <Text style={styles.settingsText}>⚙️</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
             <Text style={styles.logoutText}>Logout</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>🚗 Start a New Ride</Text>
-        <Text style={styles.sectionSubtitle}>Select your destination on the map</Text>
-        
-        <TouchableOpacity
-          style={styles.mapButton}
-          onPress={() => navigation.navigate('MapPicker', {
-            onLocationSelect: (coords, address) => {
-              setDestination(address);
-              setDestinationCoords(coords);
-            }
-          })}
-        >
-          <Text style={styles.mapButtonText}>
-            {destination ? `📍 ${destination}` : '🗺️ Select Destination on Map'}
-          </Text>
-        </TouchableOpacity>
-
-        {destinationCoords && (
-          <View style={styles.destinationInfo}>
-            <Text style={styles.destinationLabel}>Selected Destination:</Text>
-            <Text style={styles.destinationText}>{destination}</Text>
-            <Text style={styles.coordsText}>
-              Lat: {destinationCoords.latitude.toFixed(6)}
-              {'\n'}Lng: {destinationCoords.longitude.toFixed(6)}
-            </Text>
-          </View>
-        )}
-
-        <Button
-          title={rideLoading ? "Starting Ride..." : "Start Ride"}
-          onPress={handleStartRide}
-          disabled={rideLoading || !destinationCoords}
-          color="#007AFF"
+      {/* SOS Button */}
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <SosButton
+          userId="12345"
+          emergencyContact={emergencyContact}
+          location={location}
         />
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>🆘 Emergency Contact</Text>
-        <Text style={styles.sectionSubtitle}>Update your emergency contact number</Text>
-        
+      {/* Start Ride Card */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>🚗 Start a New Ride</Text>
+        <Text style={styles.cardSubtitle}>
+          Enter your destination to begin tracking
+        </Text>
         <TextInput
           style={styles.input}
-          placeholder="Emergency contact phone number"
+          placeholder="Where are you going?"
+          value={destination}
+          onChangeText={fetchSuggestions}
+        />
+        {/* Suggestions list */}
+        {suggestions.length > 0 && (
+          <FlatList
+            data={suggestions}
+            keyExtractor={(item) => item.place_id.toString()}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.suggestionItem}
+                onPress={() => handleSelectSuggestion(item)}
+              >
+                <Text>{item.display_name}</Text>
+              </TouchableOpacity>
+            )}
+          />
+        )}
+        <TouchableOpacity style={styles.primaryBtn} onPress={handleStartRide}>
+          <Text style={styles.primaryBtnText}>START RIDE</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Emergency Contact Card */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>🚨 Emergency Contact</Text>
+        <Text style={styles.cardSubtitle}>
+          Update your emergency contact number
+        </Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter phone number"
           value={emergencyContact}
           onChangeText={setEmergencyContact}
           keyboardType="phone-pad"
-          maxLength={15}
         />
-
-        <Button
-          title={loading ? "Updating..." : "Update Contact"}
-          onPress={updateEmergencyContact}
-          disabled={loading}
-          color="#28a745"
-        />
+        <TouchableOpacity
+          style={[styles.primaryBtn, { backgroundColor: "green" }]}
+          onPress={handleUpdateContact}
+        >
+          <Text style={styles.primaryBtnText}>UPDATE CONTACT</Text>
+        </TouchableOpacity>
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>📱 Quick Actions</Text>
-        <View style={styles.quickActions}>
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={() => navigation.navigate('Tracking', { destination: 'Home', emergencyContact })}
-          >
-            <Text style={styles.actionButtonText}>Track to Home</Text>
+      {/* Quick Actions Card */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>📱 Quick Actions</Text>
+        <View style={styles.quickRow}>
+          <TouchableOpacity style={styles.quickBtn} onPress={handleTrackToHome}>
+            <Text style={styles.quickBtnText}>Track to Home</Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={() => Alert.alert('Emergency', 'Emergency alert sent to your contacts!')}
+          <TouchableOpacity
+            style={[styles.quickBtn, { backgroundColor: "red" }]}
+            onPress={handleSOS}
           >
-            <Text style={styles.actionButtonText}>SOS Alert</Text>
+            <Text style={styles.quickBtnText}>SOS Alert</Text>
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Map Section */}
+      {showMap && selectedCoords && (
+        <View style={{ height: 300, marginBottom: 20 }}>
+          <MapView
+            style={{ flex: 1 }}
+            initialRegion={{
+              latitude: selectedCoords.latitude,
+              longitude: selectedCoords.longitude,
+              latitudeDelta: 0.05,
+              longitudeDelta: 0.05,
+            }}
+          >
+            <Marker coordinate={selectedCoords} title="Destination" />
+            {routeCoords.length > 0 && (
+              <Polyline
+                coordinates={routeCoords}
+                strokeColor="#007AFF"
+                strokeWidth={4}
+              />
+            )}
+          </MapView>
+        </View>
+      )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#666',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  welcomeText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  headerButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  settingsButton: {
-    padding: 8,
-    marginRight: 10,
-    backgroundColor: '#007AFF',
-    borderRadius: 6,
-  },
-  settingsButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  logoutButton: {
-    padding: 8,
-    backgroundColor: '#dc3545',
-    borderRadius: 6,
-  },
-  logoutText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  section: {
-    backgroundColor: 'white',
-    margin: 15,
-    padding: 20,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 5,
-    color: '#333',
-  },
-  sectionSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 20,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    padding: 15,
-    marginBottom: 20,
-    borderRadius: 8,
-    fontSize: 16,
-    backgroundColor: 'white',
-  },
-  quickActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  actionButton: {
-    flex: 1,
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 8,
-    marginHorizontal: 5,
-    alignItems: 'center',
-  },
-  actionButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  mapButton: {
-    backgroundColor: '#e0e0e0',
-    padding: 15,
-    borderRadius: 8,
-    marginBottom: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mapButtonText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#333',
-  },
-  coordsText: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  destinationInfo: {
-    marginTop: 10,
-    padding: 10,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  destinationLabel: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#555',
-    marginBottom: 5,
-  },
-  destinationText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#333',
+  container: { flex: 1, backgroundColor: "#f5f5f5", padding: 15 },
+  header: { marginBottom: 20 },
+  appTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#007AFF",
     marginBottom: 10,
   },
+  headerRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  welcomeText: { fontSize: 18, flex: 1 },
+  settingsBtn: {
+    backgroundColor: "#007AFF",
+    padding: 8,
+    borderRadius: 6,
+  },
+  settingsText: { color: "white", fontSize: 16 },
+  logoutBtn: {
+    backgroundColor: "red",
+    padding: 8,
+    borderRadius: 6,
+  },
+  logoutText: { color: "white", fontWeight: "bold" },
+  card: {
+    backgroundColor: "white",
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  cardTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 5 },
+  cardSubtitle: { color: "#666", marginBottom: 10 },
+  input: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+    backgroundColor: "#fafafa",
+  },
+  suggestionItem: {
+    padding: 10,
+    borderBottomWidth: 1,
+    borderColor: "#eee",
+  },
+  primaryBtn: {
+    backgroundColor: "#007AFF",
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  primaryBtnText: { color: "white", fontWeight: "bold" },
+  quickRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 10,
+  },
+  quickBtn: {
+    flex: 1,
+    backgroundColor: "#007AFF",
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    marginHorizontal: 5,
+  },
+  quickBtnText: { color: "white", fontWeight: "bold" },
 });

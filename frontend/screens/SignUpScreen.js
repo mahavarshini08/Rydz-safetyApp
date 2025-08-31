@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth, db } from '../firebase';
 
 export default function SignUpScreen({ navigation }) {
@@ -24,24 +25,38 @@ export default function SignUpScreen({ navigation }) {
 
     setLoading(true);
     try {
-      // Create user with Firebase Auth
+      // ✅ Create user with Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Update display name
+      // ✅ Update display name
       await updateProfile(user, { displayName: name });
 
-      // Save user profile in Firestore
+      // ✅ Save user profile in Firestore
       await setDoc(doc(db, "users", user.uid), {
-        name: name,
-        email: email,
-        phone: '', // You can add phone field later
+        uid: user.uid,
+        name,
+        email,
+        phone: '',
         emergencyContacts: emergencyContact ? [emergencyContact] : [],
-        createdAt: new Date().toISOString()
+        createdAt: serverTimestamp()
       });
 
+      // ✅ Get Firebase ID token
+      const token = await user.getIdToken();
+
+      // ✅ Save user locally (like LoginScreen)
+      await AsyncStorage.setItem('user', JSON.stringify({
+        id: user.uid,
+        name,
+        email,
+        phone: '',
+        emergencyContacts: emergencyContact ? [emergencyContact] : [],
+        token
+      }));
+
       Alert.alert('Success', 'Account created successfully!', [
-        { text: 'OK', onPress: () => navigation.replace('Login') }
+        { text: 'OK', onPress: () => navigation.replace('Home') }
       ]);
     } catch (error) {
       console.error('Signup error:', error);
@@ -156,7 +171,7 @@ const styles = StyleSheet.create({
   },
   link: { 
     marginTop: 20, 
-    color: '#007AFF', 
+    color: "#007AFF", 
     textAlign: 'center',
     fontSize: 16
   }

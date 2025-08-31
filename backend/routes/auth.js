@@ -1,87 +1,122 @@
-// routes/auth.js
 const express = require("express");
+const admin = require("firebase-admin");
+const { db } = require("../firebase-config");
+
 const router = express.Router();
-const User = require("../models/user");
-const jwt = require("jsonwebtoken");
 
-// --- Register / Signup
-router.post("/register", async (req, res) => {
+// 🔧 Helper: format Firestore user object
+function formatUser(user) {
+  const createdAt =
+    user.createdAt && user.createdAt.toDate
+      ? user.createdAt.toDate().toISOString()
+      : user.createdAt;
+
+  const updatedAt =
+    user.updatedAt && user.updatedAt.toDate
+      ? user.updatedAt.toDate().toISOString()
+      : user.updatedAt;
+
+  return {
+    ...user,
+    createdAt,
+    updatedAt,
+  };
+}
+
+/**
+ * Signup (register user in Firebase Auth + Firestore)
+ * ⚠️ Best practice: signup should usually be done client-side with Firebase SDK.
+ */
+router.post("/signup", async (req, res) => {
+  const { name, phone, pushToken, email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
+
   try {
-    const { name, phone, emergencyContacts } = req.body;
+    // 1. Create user in Firebase Auth
+    const userRecord = await admin.auth().createUser({
+      email,
+      password,
+      displayName: name || "",
+      phoneNumber: phone || undefined,
+    });
 
-    if (!name || !phone) {
-      return res.status(400).json({ error: "Name and phone are required" });
+    // 2. Store extra data in Firestore
+    const userData = {
+      id: userRecord.uid,
+      name: name || "",
+      phone: phone || "",
+      email,
+      pushToken: pushToken || null,
+      createdAt: admin.firestore.Timestamp.now(),
+    };
+
+    await db.collection("users").doc(userRecord.uid).set(userData);
+
+    // ✅ Return formatted data + custom token
+    const idToken = await admin.auth().createCustomToken(userRecord.uid);
+
+    res.json({ user: formatUser(userData), token: idToken });
+  } catch (err) {
+    console.error("❌ Signup failed:", err);
+    res.status(500).json({ error: "Signup failed", details: err.message });
+  }
+});
+
+/**
+ * Login
+ * 👉 Client logs in with Firebase SDK → sends ID token here for verification
+ */
+router.post("/login", async (req, res) => {
+  const { idToken } = req.body;
+
+  if (!idToken) {
+    return res.status(400).json({ error: "ID token required" });
+  }
+
+  try {
+    // Verify token from Firebase
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    const uid = decoded.uid;
+
+    // Fetch user from Firestore
+    const userDoc = await db.collection("users").doc(uid).get();
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: "User not found in Firestore" });
     }
 
-    const existing = await User.findByPhone(phone);
-    if (existing) return res.status(400).json({ error: "User already exists" });
-
-    const user = await User.create({ name, phone, emergencyContacts: emergencyContacts || [] });
-
-    res.json({ message: "User registered", user });
+    res.json({ user: formatUser(userDoc.data()), token: idToken });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
+    console.error("❌ Login failed:", err);
+    res.status(401).json({ error: "Invalid or expired token", details: err.message });
   }
 });
 
-// --- Login
-router.post("/login", async (req, res) => {
-  try {
-    const { phone } = req.body;
+/**
+ * Get profile of logged-in user
+ */
+router.get("/me", async (req, res) => {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1];
 
-    if (!phone) return res.status(400).json({ error: "Phone is required" });
-
-    const user = await User.findByPhone(phone);
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    // Generate JWT token
-    const token = jwt.sign({ userId: user.id, phone: user.phone }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '7d' });
-
-    res.json({ message: "Login successful", user, token });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
+  if (!token) {
+    return res.status(401).json({ error: "Token required" });
   }
-});
 
-// --- Update User Profile
-router.put("/update", async (req, res) => {
   try {
-    const { userId } = req.user; // From JWT middleware
-    const { name, phone, emergencyContacts, pushToken } = req.body;
+    const decoded = await admin.auth().verifyIdToken(token);
+    const userDoc = await db.collection("users").doc(decoded.uid).get();
 
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: "User not found in Firestore" });
+    }
 
-    // Update fields if provided
-    const updateData = {};
-    if (name) updateData.name = name;
-    if (phone) updateData.phone = phone;
-    if (emergencyContacts) updateData.emergencyContacts = emergencyContacts;
-    if (pushToken) updateData.pushToken = pushToken;
-
-    await User.update(userId, updateData);
-
-    res.json({ message: "Profile updated successfully", user });
+    res.json({ user: formatUser(userDoc.data()) });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
-  }
-});
-
-// --- Get User Profile
-router.get("/profile", async (req, res) => {
-  try {
-    const { userId } = req.user; // From JWT middleware
-
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    res.json({ user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
+    console.error("❌ Token verification failed:", err);
+    res.status(403).json({ error: "Invalid token", details: err.message });
   }
 });
 

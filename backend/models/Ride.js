@@ -1,141 +1,90 @@
-// Firebase-based Ride model
-const { db, admin } = require('../firebase-config');
+// models/Ride.js
+const admin = require("firebase-admin");
+const { db } = require("../firebase-config");
 
-class Ride {
-  constructor(data) {
-    this.id = data.id;
-    this.userId = data.userId;
-    this.startTime = data.startTime || new Date();
-    this.endTime = data.endTime;
-    this.geofenceOrigin = data.geofenceOrigin;
-    this.route = data.route || [];
-  }
+const RIDE_COLLECTION = "rides";
 
-  // Create a new ride
-  static async create(rideData) {
-    try {
-      const rideRef = await db.collection('rides').add({
-        userId: rideData.userId,
-        startTime: new Date(),
-        endTime: null,
-        geofenceOrigin: rideData.geofenceOrigin || null,
-        route: []
-      });
-      
-      return { id: rideRef.id, ...rideData, startTime: new Date() };
-    } catch (error) {
-      throw new Error(`Failed to create ride: ${error.message}`);
-    }
-  }
+const Ride = {
+  // ✅ Create a new ride
+  async create({ userId, pickup, dropoff, status }) {
+    const rideRef = db.collection(RIDE_COLLECTION).doc();
 
-  // Find ride by ID
-  static async findById(id) {
-    try {
-      const doc = await db.collection('rides').doc(id).get();
-      
-      if (!doc.exists) {
-        return null;
-      }
-      
-      return { id: doc.id, ...doc.data() };
-    } catch (error) {
-      throw new Error(`Failed to find ride: ${error.message}`);
-    }
-  }
+    const rideData = {
+      id: rideRef.id,
+      userId,
+      pickup,
+      dropoff,
+      status: status || "pending",
+      locations: [],   // 📍 live tracking points
+      emergencies: [], // 🚨 emergency logs
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
 
-  // Find rides by user ID
-  static async findByUserId(userId) {
-    try {
-      const snapshot = await db.collection('rides')
-        .where('userId', '==', userId)
-        .orderBy('startTime', 'desc')
-        .get();
-      
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-    } catch (error) {
-      throw new Error(`Failed to find rides: ${error.message}`);
-    }
-  }
+    await rideRef.set(rideData);
+    const saved = await rideRef.get();
+    return { id: rideRef.id, ...saved.data() };
+  },
 
-  // Update ride
-  static async update(id, updateData) {
-    try {
-      await db.collection('rides').doc(id).update(updateData);
-      return { id, ...updateData };
-    } catch (error) {
-      throw new Error(`Failed to update ride: ${error.message}`);
-    }
-  }
+  // ✅ Get rides for a user
+  async findByUser(userId) {
+    const snapshot = await db
+      .collection(RIDE_COLLECTION)
+      .where("userId", "==", userId)
+      .orderBy("createdAt", "desc")
+      .get();
 
-  // End a ride
-  static async end(id) {
-    try {
-      await db.collection('rides').doc(id).update({
-        endTime: new Date()
-      });
-      return true;
-    } catch (error) {
-      throw new Error(`Failed to end ride: ${error.message}`);
-    }
-  }
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  },
 
-  // Add route point
-  static async addRoutePoint(id, point) {
-    try {
-      const rideRef = db.collection('rides').doc(id);
-      await rideRef.update({
-        route: admin.firestore.FieldValue.arrayUnion({
-          latitude: point.latitude,
-          longitude: point.longitude,
-          timestamp: new Date()
-        })
-      });
-      return true;
-    } catch (error) {
-      throw new Error(`Failed to add route point: ${error.message}`);
-    }
-  }
+  // ✅ Find ride by ID
+  async findById(rideId) {
+    const doc = await db.collection(RIDE_COLLECTION).doc(rideId).get();
+    if (!doc.exists) return null;
+    return { id: doc.id, ...doc.data() };
+  },
 
-  // Get active rides for a user
-  static async getActiveRides(userId) {
-    try {
-      const snapshot = await db.collection('rides')
-        .where('userId', '==', userId)
-        .where('endTime', '==', null)
-        .orderBy('startTime', 'desc')
-        .get();
-      
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-    } catch (error) {
-      throw new Error(`Failed to get active rides: ${error.message}`);
-    }
-  }
+  // ✅ Update ride fields (status, dropoff, etc.)
+  async update(rideId, data) {
+    const rideRef = db.collection(RIDE_COLLECTION).doc(rideId);
+    await rideRef.update({
+      ...data,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    const updated = await rideRef.get();
+    return { id: rideId, ...updated.data() };
+  },
 
-  // Get ride statistics
-  static async getRideStats(userId) {
-    try {
-      const snapshot = await db.collection('rides')
-        .where('userId', '==', userId)
-        .get();
-      
-      const rides = snapshot.docs.map(doc => doc.data());
-      const completedRides = rides.filter(ride => ride.endTime);
-      
-      return {
-        totalRides: rides.length,
-        completedRides: completedRides.length,
-        activeRides: rides.length - completedRides.length
-      };
-    } catch (error) {
-      throw new Error(`Failed to get ride stats: ${error.message}`);
-    }
-  }
-}
+  // ✅ Add location update
+  async addLocation(rideId, { lat, lng, timestamp }) {
+    const rideRef = db.collection(RIDE_COLLECTION).doc(rideId);
+    await rideRef.update({
+      locations: admin.firestore.FieldValue.arrayUnion({
+        lat,
+        lng,
+        timestamp: timestamp || new Date().toISOString(),
+      }),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    const updated = await rideRef.get();
+    return { id: rideId, ...updated.data() };
+  },
+
+  // ✅ Add emergency alert
+  async addEmergency(rideId, { lat, lng, distance, timestamp }) {
+    const rideRef = db.collection(RIDE_COLLECTION).doc(rideId);
+    await rideRef.update({
+      emergencies: admin.firestore.FieldValue.arrayUnion({
+        lat,
+        lng,
+        distance: distance || null,
+        timestamp: timestamp || new Date().toISOString(),
+      }),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    const updated = await rideRef.get();
+    return { id: rideId, ...updated.data() };
+  },
+};
 
 module.exports = Ride;
