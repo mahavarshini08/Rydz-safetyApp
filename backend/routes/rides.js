@@ -1,113 +1,118 @@
 const express = require("express");
 const router = express.Router();
-const Ride = require("../models/Ride");
+const admin = require("../utils/firebaseAdmin"); // ✅ use central init
 
-// --- Start Ride
+const db = admin.firestore();
+
+// --------------------
+// Start a new ride
+// --------------------
 router.post("/start", async (req, res) => {
-  try {
-    const { userId, geofenceOrigin } = req.body;
-    if (!userId || !geofenceOrigin) {
-      return res.status(400).json({ error: "userId and geofenceOrigin required" });
-    }
+  const { riderId, destination } = req.body;
 
-    const ride = new Ride({ userId, geofenceOrigin, route: [] });
-    await ride.save();
-
-    res.json({ message: "Ride started", rideId: ride._id });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
+  if (!riderId || !destination) {
+    return res.status(400).json({ error: "riderId and destination required" });
   }
-});
 
-// --- Update Ride (add new location point)
-router.post("/:id/update", async (req, res) => {
   try {
-    const { latitude, longitude } = req.body;
-    if (!latitude || !longitude) {
-      return res.status(400).json({ error: "latitude and longitude required" });
-    }
-
-    const ride = await Ride.findById(req.params.id);
-    if (!ride) return res.status(404).json({ error: "Ride not found" });
-
-    ride.route.push({ latitude, longitude });
-    await ride.save();
-
-    res.json({ message: "Point added", ride });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
-  }
-});
-
-// --- End Ride
-router.post("/:id/end", async (req, res) => {
-  try {
-    const ride = await Ride.findById(req.params.id);
-    if (!ride) return res.status(404).json({ error: "Ride not found" });
-
-    ride.endTime = new Date();
-    await ride.save();
-
-    res.json({ message: "Ride ended", ride });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
-  }
-});
-
-// --- Get Ride Details
-router.get("/:id", async (req, res) => {
-  try {
-    const ride = await Ride.findById(req.params.id).populate("userId", "name phone");
-    if (!ride) return res.status(404).json({ error: "Ride not found" });
-
-    res.json(ride);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
-  }
-});
-
-// Emergency alert route
-router.post("/emergency", async (req, res) => {
-  try {
-    const { rideId, currentLocation, destination, emergencyContact, deviation } = req.body;
-    const { userId } = req.user;
-
-    if (!rideId || !currentLocation || !emergencyContact) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    // Log the emergency alert
-    console.log("🚨 EMERGENCY ALERT:", {
-      rideId,
-      userId,
-      currentLocation,
+    const rideDoc = await db.collection("rides").add({
+      riderId,
       destination,
-      emergencyContact,
-      deviation,
-      timestamp: new Date().toISOString()
+      locations: [],
+      active: true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    // TODO: Implement actual emergency notification system
-    // This could include:
-    // - SMS to emergency contacts
-    // - Push notifications
-    // - Email alerts
-    // - Integration with emergency services
-
-    // For now, just log and acknowledge
-    res.json({ 
-      message: "Emergency alert received and logged",
-      alertId: `alert-${Date.now()}`,
-      timestamp: new Date().toISOString()
-    });
-
+    res.json({ ok: true, rideId: rideDoc.id });
   } catch (err) {
-    console.error("Emergency alert error:", err);
-    res.status(500).json({ error: "Failed to process emergency alert" });
+    console.error("Error starting ride:", err);
+    res.status(500).json({ error: "Failed to start ride" });
+  }
+});
+
+// --------------------
+// Update ride location
+// --------------------
+router.put("/:rideId/update", async (req, res) => {
+  const { rideId } = req.params;
+  const { lat, lng, timestamp } = req.body;
+
+  try {
+    const rideRef = db.collection("rides").doc(rideId);
+    const rideSnap = await rideRef.get();
+
+    if (!rideSnap.exists) {
+      return res.status(404).json({ error: "Ride not found" });
+    }
+
+    await rideRef.update({
+      locations: admin.firestore.FieldValue.arrayUnion({
+        lat,
+        lng,
+        timestamp: timestamp || Date.now(),
+      }),
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Error updating ride:", err);
+    res.status(500).json({ error: "Failed to update ride" });
+  }
+});
+
+// --------------------
+// Fetch ride details (route + status)
+// --------------------
+router.get("/:rideId", async (req, res) => {
+  const { rideId } = req.params;
+
+  try {
+    const rideRef = db.collection("rides").doc(rideId);
+    const rideSnap = await rideRef.get();
+
+    if (!rideSnap.exists) {
+      return res.status(404).json({ error: "Ride not found" });
+    }
+
+    res.json({ ok: true, ride: { id: rideSnap.id, ...rideSnap.data() } });
+  } catch (err) {
+    console.error("Error fetching ride:", err);
+    res.status(500).json({ error: "Failed to fetch ride" });
+  }
+});
+
+// --------------------
+// Send SOS alert
+// --------------------
+router.post("/:rideId/alert", async (req, res) => {
+  const { rideId } = req.params;
+  const { message, emergencyContactToken, lat, lng } = req.body;
+
+  try {
+    const rideRef = db.collection("rides").doc(rideId);
+    const rideSnap = await rideRef.get();
+
+    if (!rideSnap.exists) {
+      return res.status(404).json({ error: "Ride not found" });
+    }
+
+    await admin.messaging().send({
+      token: emergencyContactToken,
+      notification: {
+        title: "🚨 SOS Alert",
+        body: message || "Your contact triggered an SOS!",
+      },
+      data: {
+        rideId,
+        lat: String(lat),
+        lng: String(lng),
+      },
+    });
+
+    res.json({ ok: true, message: "SOS alert sent!" });
+  } catch (err) {
+    console.error("Error sending SOS:", err);
+    res.status(500).json({ error: "Failed to send SOS alert" });
   }
 });
 

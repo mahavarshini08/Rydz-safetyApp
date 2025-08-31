@@ -1,4 +1,23 @@
 {
-  "compilerOptions": {},
-  "extends": "expo/tsconfig.base"
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "Node16",                 // ← Must match node16 resolution
+    "lib": ["dom", "esnext"],
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "moduleResolution": "node16",       // ← Matches module
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    },
+    "types": ["node", "react", "react-native", "expo-notifications", "socket.io-client"]
+  },
+  "exclude": ["node_modules", "babel.config.js", "metro.config.js", "jest.config.js"]
 }

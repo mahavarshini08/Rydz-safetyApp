@@ -1,28 +1,34 @@
 {
   "name": "rydz-safety-app",
   "version": "1.0.0",
-  "description": "Ride safety application with real-time location tracking",
-  "main": "backend/server.js",
+  "main": "node_modules/expo/AppEntry.js",
   "scripts": {
-    "start": "node backend/server.js",
-    "dev": "nodemon backend/server.js",
-    "test": "node backend/test-firebase.js",
-    "frontend": "cd frontend && npm start",
-    "install:all": "npm install && cd frontend && npm install",
-    "build": "cd frontend && npm run build"
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
   },
   "dependencies": {
-    "cors": "^2.8.5",
-    "dotenv": "^16.0.0",
-    "express": "^4.18.2",
-    "firebase-admin": "^13.4.0",
-    "jsonwebtoken": "^9.0.2",
-    "socket.io": "^4.8.1"
+    "expo": "~48.0.0",
+    "expo-location": "~15.1.1",
+    "expo-task-manager": "~11.1.1",
+    "expo-notifications": "~0.21.3",
+    "expo-device": "~5.1.1",
+    "react": "18.2.0",
+    "react-native": "0.72.3",
+    "react-native-maps": "1.5.0",
+    "socket.io-client": "^4.7.2",
+    "geolib": "^3.3.3",
+    "@react-navigation/native": "^6.1.6",
+    "@react-navigation/native-stack": "^6.9.12"
   },
   "devDependencies": {
-    "nodemon": "^3.0.0"
-  },
-  "keywords": ["ride-safety", "location-tracking", "firebase", "socket.io"],
-  "author": "Your Name",
-  "license": "MIT"
+    "typescript": "^5.2.2",
+    "@types/react": "~18.0.37",
+    "@types/react-native": "~0.72.2",
+    "@types/socket.io-client": "^1.4.36",
+    "@types/geolib": "^3.3.1",
+    "eslint": "^8.48.0",
+    "babel-preset-expo": "^9.2.0"
+  }
 }

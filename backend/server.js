@@ -1,62 +1,54 @@
-// Main server file
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
-const jwt = require("jsonwebtoken"); 
+const admin = require("firebase-admin");
+const serviceAccount = require("./firebase-service-account.json");
 
-// Import Firebase config
-const { db } = require("./firebase-config");
-
-// Import models
-const User = require("./models/user");
-const Ride = require("./models/Ride");
-
-// Import routes
+// Routes
 const authRoutes = require("./routes/auth");
 const rideRoutes = require("./routes/rides");
+
+// -------------------
+// Initialize Firebase Admin
+// -------------------
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+// Firebase middleware (only used for protected routes)
+const auth = require("./middleware/auth");
 
 const app = express();
 const server = http.createServer(app);
 
-// ---- middleware
+// -------------------
+// Middleware
+// -------------------
 app.use(cors({ origin: "*", methods: ["GET", "POST"] }));
 app.use(express.json());
 
-// JWT verification middleware
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ error: 'Access token required' });
-  }
-
-  jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key', (err, user) => {
-    if (err) {
-      return res.status(403).json({ error: 'Invalid token' });
-    }
-    req.user = user;
-    next();
-  });
-};
-
-// ---- routes
-app.use("/api/auth", authRoutes);
-app.use("/api/rides", authenticateToken, rideRoutes);
-
-// Root route
-app.get("/", (_req, res) => {
-  res.send("🚗 Ride Safety Backend is running ✅");
+// ✅ Simple test route
+app.get("/api/test", (_req, res) => {
+  res.json({ success: true, message: "Backend is working!" });
 });
 
-// ---- socket.io
+// ✅ Routes
+app.use("/api/auth", authRoutes);
+app.use("/api/rides", auth, rideRoutes);
+
+app.get("/", (_req, res) => {
+  res.json({ success: true, message: "🚗 Ride Safety Backend running ✅" });
+});
+
+// -------------------
+// Socket.io for real-time location
+// -------------------
 const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] },
 });
 
-// store latest locations (in memory)
 const clients = new Map();
 
 io.on("connection", (socket) => {
@@ -67,11 +59,8 @@ io.on("connection", (socket) => {
       latitude: point.latitude,
       longitude: point.longitude,
       timestamp: point.timestamp || Date.now(),
-      via: "socket",
     };
     clients.set(socket.id, entry);
-
-    console.log("📍 [SOCKET]", socket.id, entry);
     socket.broadcast.emit("location_broadcast", { id: socket.id, ...entry });
   });
 
@@ -81,44 +70,80 @@ io.on("connection", (socket) => {
   });
 });
 
-// Debug: all last-seen locations
+// Debug: get all last-seen locations
 app.get("/locations", (_req, res) => {
   const obj = {};
   for (const [id, val] of clients.entries()) obj[id] = val;
   res.json(obj);
 });
 
-// Background updates via HTTP
+// Background location updates via HTTP
 app.post("/locations", (req, res) => {
   const { latitude, longitude, timestamp, riderId } = req.body || {};
   if (typeof latitude !== "number" || typeof longitude !== "number") {
     return res
       .status(400)
-      .json({ error: "latitude and longitude are required numbers" });
+      .json({ success: false, message: "latitude and longitude required" });
   }
 
   const id = riderId || `bg-${Date.now()}`;
-  const entry = {
-    latitude,
-    longitude,
-    timestamp: timestamp || Date.now(),
-    via: "http",
-  };
-
+  const entry = { latitude, longitude, timestamp: timestamp || Date.now() };
   clients.set(id, entry);
-
-  console.log("📡 [HTTP ]", id, entry);
-
   io.emit("location_broadcast", { id, ...entry });
 
-  res.json({ ok: true, id });
+  res.json({ success: true, id });
 });
 
-// ---- Firebase
-console.log("✅ Firebase initialized");
+// -------------------
+// 🚨 SOS Alert API
+// -------------------
+app.post("/api/sos", async (req, res) => {
+  try {
+    const { latitude, longitude, emergencyContactToken, userId } = req.body;
 
-// ---- start server
+    if (!latitude || !longitude) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing required fields" });
+    }
+
+    // 🚨 Push notification via Firebase (if FCM token exists)
+    if (emergencyContactToken) {
+      await admin.messaging().send({
+        token: emergencyContactToken,
+        notification: {
+          title: "🚨 SOS Alert",
+          body: "Your contact triggered an SOS!",
+        },
+        data: {
+          latitude: String(latitude),
+          longitude: String(longitude),
+          userId: userId || "unknown",
+        },
+      });
+    } else {
+      console.log("⚠️ No FCM token, frontend must handle SMS fallback.");
+    }
+
+    return res.json({
+      success: true,
+      message: "🚨 SOS alert processed",
+      location: { latitude, longitude },
+    });
+  } catch (err) {
+    console.error("❌ SOS error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send SOS alert",
+      error: err.message,
+    });
+  }
+});
+
+// -------------------
+// Start server
+// -------------------
 const PORT = process.env.PORT || 4000;
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running at http://0.0.0.0:${PORT}`);
+server.listen(PORT, "192.168.1.7", () => {
+  console.log(`🚀 Server running at http://192.168.1.7:${PORT}`);
 });

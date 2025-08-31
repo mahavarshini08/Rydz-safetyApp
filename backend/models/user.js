@@ -4,26 +4,31 @@ const { db, admin } = require('../firebase-config');
 class User {
   constructor(data) {
     this.id = data.id;
-    this.phone = data.phone;
-    this.name = data.name;
-    this.pushToken = data.pushToken;
+    this.name = data.name || '';
+    this.phone = data.phone || '';
+    this.pushToken = data.pushToken || null;
     this.emergencyContacts = data.emergencyContacts || [];
-    this.createdAt = data.createdAt || new Date();
+    this.createdAt = data.createdAt || admin.firestore.Timestamp.now();
+    this.updatedAt = data.updatedAt || null;
   }
 
   // Create a new user
   static async create(userData) {
     try {
+      const now = admin.firestore.Timestamp.now();
+
       const userRef = await db.collection('users').add({
-        phone: userData.phone,
-        name: userData.name,
-        pushToken: userData.pushToken,
+        name: userData.name || '',
+        phone: userData.phone || '',
+        pushToken: userData.pushToken || null,
         emergencyContacts: userData.emergencyContacts || [],
-        createdAt: new Date()
+        createdAt: now,
+        updatedAt: now
       });
-      
-      return { id: userRef.id, ...userData };
+
+      return { id: userRef.id, ...userData, createdAt: now, updatedAt: now };
     } catch (error) {
+      console.error('Failed to create user:', error);
       throw new Error(`Failed to create user: ${error.message}`);
     }
   }
@@ -35,14 +40,13 @@ class User {
         .where('phone', '==', phone)
         .limit(1)
         .get();
-      
-      if (snapshot.empty) {
-        return null;
-      }
-      
+
+      if (snapshot.empty) return null;
+
       const doc = snapshot.docs[0];
       return { id: doc.id, ...doc.data() };
     } catch (error) {
+      console.error('Failed to find user by phone:', error);
       throw new Error(`Failed to find user: ${error.message}`);
     }
   }
@@ -50,14 +54,12 @@ class User {
   // Find user by ID
   static async findById(id) {
     try {
-      const doc = await db.collection('users').doc(id).get();
-      
-      if (!doc.exists) {
-        return null;
-      }
-      
-      return { id: doc.id, ...doc.data() };
+      const docRef = db.collection('users').doc(id);
+      const docSnap = await docRef.get();
+      if (!docSnap.exists) return null;
+      return { id: docSnap.id, ...docSnap.data() };
     } catch (error) {
+      console.error('Failed to find user by ID:', error);
       throw new Error(`Failed to find user: ${error.message}`);
     }
   }
@@ -65,9 +67,14 @@ class User {
   // Update user
   static async update(id, updateData) {
     try {
-      await db.collection('users').doc(id).update(updateData);
-      return { id, ...updateData };
+      const now = admin.firestore.Timestamp.now();
+      await db.collection('users').doc(id).update({
+        ...updateData,
+        updatedAt: now
+      });
+      return { id, ...updateData, updatedAt: now };
     } catch (error) {
+      console.error('Failed to update user:', error);
       throw new Error(`Failed to update user: ${error.message}`);
     }
   }
@@ -77,10 +84,12 @@ class User {
     try {
       const userRef = db.collection('users').doc(id);
       await userRef.update({
-        emergencyContacts: admin.firestore.FieldValue.arrayUnion(contact)
+        emergencyContacts: admin.firestore.FieldValue.arrayUnion(contact),
+        updatedAt: admin.firestore.Timestamp.now()
       });
       return true;
     } catch (error) {
+      console.error('Failed to add emergency contact:', error);
       throw new Error(`Failed to add emergency contact: ${error.message}`);
     }
   }
@@ -90,10 +99,12 @@ class User {
     try {
       const userRef = db.collection('users').doc(id);
       await userRef.update({
-        emergencyContacts: admin.firestore.FieldValue.arrayRemove(contact)
+        emergencyContacts: admin.firestore.FieldValue.arrayRemove(contact),
+        updatedAt: admin.firestore.Timestamp.now()
       });
       return true;
     } catch (error) {
+      console.error('Failed to remove emergency contact:', error);
       throw new Error(`Failed to remove emergency contact: ${error.message}`);
     }
   }
