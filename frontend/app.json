@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Rydz-safetyApp",
-    "slug": "Rydz-safetyApp",
+    "name": "Flare-safetyApp",
+    "slug": "Flare-safetyApp",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -24,7 +24,7 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.madhu_1611.RydzsafetyApp",
+      "package": "com.madhu_1611.FlaresafetyApp",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",

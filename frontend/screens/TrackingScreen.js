@@ -104,7 +104,7 @@ export default function TrackingScreen({ route }) {
   useEffect(() => {
     if (!rideId) return;
 
-    socketRef.current = io('http://192.168.1.7:4000', {
+    socketRef.current = io('http://10.135.138.202:4000', {
       transports: ['websocket'],
     });
 

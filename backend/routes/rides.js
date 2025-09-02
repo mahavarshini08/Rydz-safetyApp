@@ -1,8 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const admin = require("../utils/firebaseAdmin"); // ✅ use central init
-
-const db = admin.firestore();
+const { admin, db } = require("../firebase-config");
 
 // --------------------
 // Start a new ride
@@ -20,7 +18,7 @@ router.post("/start", async (req, res) => {
       destination,
       locations: [],
       active: true,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: admin.firestore.Timestamp.now(),
     });
 
     res.json({ ok: true, rideId: rideDoc.id });
@@ -96,23 +94,39 @@ router.post("/:rideId/alert", async (req, res) => {
       return res.status(404).json({ error: "Ride not found" });
     }
 
-    await admin.messaging().send({
-      token: emergencyContactToken,
-      notification: {
-        title: "🚨 SOS Alert",
-        body: message || "Your contact triggered an SOS!",
-      },
-      data: {
-        rideId,
-        lat: String(lat),
-        lng: String(lng),
-      },
+    // Log the alert
+    await rideRef.update({
+      alerts: admin.firestore.FieldValue.arrayUnion({
+        message: message || "SOS Alert",
+        timestamp: admin.firestore.Timestamp.now(),
+        location: { lat, lng },
+      }),
     });
 
-    res.json({ ok: true, message: "SOS alert sent!" });
+    // Send push notification if token provided
+    if (emergencyContactToken) {
+      try {
+        await admin.messaging().send({
+          token: emergencyContactToken,
+          notification: {
+            title: "🚨 SOS Alert",
+            body: message || "Emergency alert from ride",
+          },
+          data: {
+            rideId,
+            lat: String(lat),
+            lng: String(lng),
+          },
+        });
+      } catch (notificationError) {
+        console.error("Push notification failed:", notificationError);
+      }
+    }
+
+    res.json({ ok: true, message: "Alert sent" });
   } catch (err) {
-    console.error("Error sending SOS:", err);
-    res.status(500).json({ error: "Failed to send SOS alert" });
+    console.error("Error sending alert:", err);
+    res.status(500).json({ error: "Failed to send alert" });
   }
 });
 

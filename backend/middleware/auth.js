@@ -1,5 +1,5 @@
 // middleware/auth.js
-const admin = require("../utils/firebaseAdmin");
+const { admin } = require("../firebase-config");
 
 /**
  * Firebase auth middleware
@@ -7,7 +7,7 @@ const admin = require("../utils/firebaseAdmin");
  * - Verifies and checks revocation
  * - Attaches req.user (decoded claims) and req.firebaseUser (UserRecord)
  */
-async function auth(req, res, next) {
+async function authenticateToken(req, res, next) {
   try {
     // 1) Extract token
     const header = req.headers.authorization || "";
@@ -27,7 +27,7 @@ async function auth(req, res, next) {
     //    If you don't need revocation checks, set the 2nd arg to false.
     const decoded = await admin.auth().verifyIdToken(token, true);
 
-    // 3) (Optional) Load user record to ensure the account isn’t disabled
+    // 3) (Optional) Load user record to ensure the account isn't disabled
     const userRecord = await admin.auth().getUser(decoded.uid);
     if (userRecord.disabled) {
       return res.status(403).json({ error: "User account is disabled" });
@@ -58,4 +58,4 @@ async function auth(req, res, next) {
   }
 }
 
-module.exports = auth;
+module.exports = { authenticateToken };

@@ -1,6 +1,5 @@
 const express = require("express");
-const admin = require("firebase-admin");
-const { db } = require("../firebase-config");
+const { admin, db } = require("../firebase-config");
 
 const router = express.Router();
 
@@ -98,25 +97,43 @@ router.post("/login", async (req, res) => {
  * Get profile of logged-in user
  */
 router.get("/me", async (req, res) => {
-  const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1];
-
-  if (!token) {
-    return res.status(401).json({ error: "Token required" });
-  }
+  const { uid } = req.user; // From middleware
 
   try {
-    const decoded = await admin.auth().verifyIdToken(token);
-    const userDoc = await db.collection("users").doc(decoded.uid).get();
-
+    const userDoc = await db.collection("users").doc(uid).get();
     if (!userDoc.exists) {
-      return res.status(404).json({ error: "User not found in Firestore" });
+      return res.status(404).json({ error: "User not found" });
     }
 
     res.json({ user: formatUser(userDoc.data()) });
   } catch (err) {
-    console.error("❌ Token verification failed:", err);
-    res.status(403).json({ error: "Invalid token", details: err.message });
+    console.error("❌ Profile fetch failed:", err);
+    res.status(500).json({ error: "Failed to fetch profile" });
+  }
+});
+
+/**
+ * Update user profile
+ */
+router.put("/me", async (req, res) => {
+  const { uid } = req.user;
+  const { name, phone, pushToken } = req.body;
+
+  try {
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (phone !== undefined) updateData.phone = phone;
+    if (pushToken !== undefined) updateData.pushToken = pushToken;
+    updateData.updatedAt = admin.firestore.Timestamp.now();
+
+    await db.collection("users").doc(uid).update(updateData);
+
+    // Fetch updated user
+    const userDoc = await db.collection("users").doc(uid).get();
+    res.json({ user: formatUser(userDoc.data()) });
+  } catch (err) {
+    console.error("❌ Profile update failed:", err);
+    res.status(500).json({ error: "Failed to update profile" });
   }
 });
 

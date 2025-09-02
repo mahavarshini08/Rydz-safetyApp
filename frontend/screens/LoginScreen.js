@@ -62,7 +62,7 @@ export default function LoginScreen({ navigation }) {
         })
       );
 
-      navigation.replace("HomeScreen");
+      navigation.replace("Home");
     } catch (error) {
       console.error("Login error:", error);
       let errorMessage = "Login failed";
@@ -86,7 +86,7 @@ export default function LoginScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Welcome Back</Text>
-      <Text style={styles.subtitle}>Sign in to your Rydz Safety account</Text>
+      <Text style={styles.subtitle}>Sign in to your Flare Safety account</Text>
 
       <TextInput
         style={styles.input}

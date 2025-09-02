@@ -12,7 +12,7 @@ export default function RideTrackingScreen({ route, navigation }) {
 
   useEffect(() => {
     let watcher;
-    const socket = io('http://192.168.1.7:4000'); // replace with your server
+    const socket = io('http://10.135.138.202:4000'); // Your backend server IP
 
     const startTracking = async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();

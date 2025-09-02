@@ -69,7 +69,7 @@ export default function App() {
           name="Home"
           component={HomeScreen}
           options={{
-            title: "Rydz Safety",
+            title: "Flare Safety",
             headerRight: () => null,
           }}
         />

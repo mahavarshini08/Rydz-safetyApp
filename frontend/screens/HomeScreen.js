@@ -15,6 +15,7 @@ import { auth } from "../firebase";
 import MapView, { Marker, Polyline } from "react-native-maps";
 import SosButton from "../components/SosButton";
 import * as Location from "expo-location";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function HomeScreen({ navigation }) {
   const [destination, setDestination] = useState("");
@@ -25,6 +26,35 @@ export default function HomeScreen({ navigation }) {
   const [user, setUser] = useState(null);
   const [showMap, setShowMap] = useState(false);
   const [location, setLocation] = useState(null);
+
+  // Debug navigation prop
+  useEffect(() => {
+    console.log("🔍 Navigation prop received:", !!navigation);
+    console.log("🔍 Navigation methods:", navigation ? Object.keys(navigation) : "No navigation");
+  }, [navigation]);
+
+  // Global error handler for debugging
+  useEffect(() => {
+    const handleError = (error) => {
+      console.error("🚨 Global error caught:", error);
+      console.error("🚨 Error type:", typeof error);
+      console.error("🚨 Error message:", error.message);
+    };
+
+    // Add global error handler
+    if (typeof window !== 'undefined') {
+      window.addEventListener('error', handleError);
+      window.addEventListener('unhandledrejection', (event) => {
+        console.error("🚨 Unhandled promise rejection:", event.reason);
+      });
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('error', handleError);
+      }
+    };
+  }, []);
 
   // listen for logged in user
   useEffect(() => {
@@ -78,16 +108,95 @@ export default function HomeScreen({ navigation }) {
       setSuggestions([]);
       return;
     }
+    
+    const apiUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
+      text
+    )}&format=json&limit=5`;
+    
+    console.log("🔍 Fetching suggestions from:", apiUrl);
+    
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
-          text
-        )}&format=json&limit=5`
-      );
-      const data = await res.json();
-      setSuggestions(data);
+      const res = await fetch(apiUrl);
+      
+      console.log("📡 Response status:", res.status);
+      console.log("📡 Response headers:", Object.fromEntries(res.headers.entries()));
+      
+      // Check if response is ok
+      if (!res.ok) {
+        console.error("❌ Nominatim API error:", res.status, res.statusText);
+        setSuggestions([]);
+        return;
+      }
+      
+      // Get the raw text first to debug
+      const rawText = await res.text();
+      console.log("📄 Raw response (first 200 chars):", rawText.substring(0, 200));
+      
+      // Check if it looks like HTML
+      if (rawText.trim().startsWith('<')) {
+        console.error("❌ Response is HTML, not JSON:", rawText.substring(0, 500));
+        setSuggestions([]);
+        return;
+      }
+      
+      // Try to parse as JSON
+      let data;
+      try {
+        data = JSON.parse(rawText);
+      } catch (parseError) {
+        console.error("❌ JSON parse error:", parseError);
+        console.error("❌ Raw response:", rawText);
+        setSuggestions([]);
+        return;
+      }
+      
+      if (Array.isArray(data)) {
+        console.log("✅ Got suggestions:", data.length, "items");
+        setSuggestions(data);
+      } else {
+        console.error("❌ Unexpected data format:", data);
+        // Try fallback service
+        await tryFallbackGeocoding(text);
+      }
     } catch (err) {
-      console.error("Suggestion fetch error:", err);
+      console.error("❌ Network/other error:", err);
+      console.error("❌ Error type:", typeof err);
+      console.error("❌ Error message:", err.message);
+      console.error("❌ Error stack:", err.stack);
+      // Try fallback service
+      await tryFallbackGeocoding(text);
+    }
+  };
+
+  // Fallback geocoding service
+  const tryFallbackGeocoding = async (text) => {
+    console.log("🔄 Trying fallback geocoding service...");
+    try {
+      // Use a different geocoding service as fallback
+      const fallbackUrl = `https://geocode.maps.co/search?q=${encodeURIComponent(text)}&format=json`;
+      const res = await fetch(fallbackUrl);
+      
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          console.log("✅ Fallback service worked:", data.length, "items");
+          // Convert fallback format to match Nominatim format
+          const convertedData = data.map(item => ({
+            place_id: item.place_id || Math.random().toString(),
+            display_name: item.display_name || item.name || text,
+            lat: item.lat || item.latitude,
+            lon: item.lon || item.longitude
+          }));
+          setSuggestions(convertedData);
+          return;
+        }
+      }
+      
+      console.log("❌ Fallback service also failed");
+      setSuggestions([]);
+    } catch (fallbackErr) {
+      console.error("❌ Fallback service error:", fallbackErr);
+      setSuggestions([]);
     }
   };
 
@@ -122,9 +231,32 @@ export default function HomeScreen({ navigation }) {
 
   const handleLogout = async () => {
     try {
+      console.log("🔄 Logging out...");
       await signOut(auth);
-      navigation.replace("Login");
+      console.log("✅ Firebase signOut successful");
+      
+      // Clear any stored user data
+      try {
+        await AsyncStorage.removeItem("user");
+        console.log("✅ AsyncStorage cleared");
+      } catch (storageErr) {
+        console.log("⚠️ AsyncStorage clear failed:", storageErr);
+      }
+      
+      // Use navigate instead of replace for more reliability
+      if (navigation && navigation.navigate) {
+        console.log("🚀 Navigating to Login screen");
+        navigation.navigate("Login");
+      } else {
+        console.error("❌ Navigation not available");
+        // Fallback: try to reset the navigation stack
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Login' }],
+        });
+      }
     } catch (err) {
+      console.error("❌ Logout error:", err);
       Alert.alert("Logout failed", err.message);
     }
   };
@@ -132,8 +264,13 @@ export default function HomeScreen({ navigation }) {
   const handleStartRide = () => {
     if (!destination || !selectedCoords)
       return Alert.alert("Enter a destination first");
-    setShowMap(true);
-    Alert.alert("Ride Started", `Going to: ${destination}`);
+    
+    // Navigate to map picker for final confirmation
+    navigation.navigate('MapPicker', {
+      destination: destination,
+      coordinates: selectedCoords,
+      routeCoords: routeCoords
+    });
   };
 
   const handleUpdateContact = () => {
@@ -145,14 +282,39 @@ export default function HomeScreen({ navigation }) {
     Alert.alert("Tracking to Home...");
   };
 
-  const handleSOS = () => {
-    if (location) {
-      Alert.alert(
-        "🚨 SOS Alert Sent!",
-        `Location shared with ${emergencyContact}\nLat: ${location.latitude}, Lng: ${location.longitude}`
-      );
-    } else {
-      Alert.alert("🚨 SOS Alert Sent!", `Location shared with ${emergencyContact}`);
+  const handleSOS = async () => {
+    if (!location) {
+      Alert.alert("Error", "Location not available yet.");
+      return;
+    }
+
+    try {
+      // Send SOS to backend
+      const response = await fetch("http://10.135.138.202:4000/api/sos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user || "unknown",
+          latitude: location.latitude,
+          longitude: location.longitude,
+          emergencyContact,
+        }),
+      });
+
+      const data = await response.json();
+      console.log("✅ Backend SOS response:", data);
+
+      if (data.success) {
+        Alert.alert(
+          "🚨 SOS Alert Sent!",
+          `Emergency alert sent to ${emergencyContact}\nLocation: ${location.latitude}, ${location.longitude}`
+        );
+      } else {
+        Alert.alert("❌ Error", "Failed to send SOS alert");
+      }
+    } catch (err) {
+      console.error("❌ SOS error:", err);
+      Alert.alert("❌ Error", "Failed to send SOS alert. Please try again.");
     }
   };
 
@@ -160,12 +322,15 @@ export default function HomeScreen({ navigation }) {
     <ScrollView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.appTitle}>Rydz Safety</Text>
+        <Text style={styles.appTitle}>Flare Safety</Text>
         <View style={styles.headerRow}>
           <Text style={styles.welcomeText}>
             {user ? `Welcome, ${user}!` : "Welcome!"}
           </Text>
-          <TouchableOpacity style={styles.settingsBtn}>
+          <TouchableOpacity 
+            style={styles.settingsBtn} 
+            onPress={() => navigation.navigate('Settings')}
+          >
             <Text style={styles.settingsText}>⚙️</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
@@ -210,6 +375,37 @@ export default function HomeScreen({ navigation }) {
             )}
           />
         )}
+
+        {/* Map Preview */}
+        {selectedCoords && (
+          <View style={styles.mapPreview}>
+            <MapView
+              style={styles.mapPreviewMap}
+              initialRegion={{
+                latitude: selectedCoords.latitude,
+                longitude: selectedCoords.longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+              }}
+              scrollEnabled={false}
+              zoomEnabled={false}
+              rotateEnabled={false}
+              pitchEnabled={false}
+            >
+              <Marker coordinate={selectedCoords} title="Destination" pinColor="red" />
+              {routeCoords.length > 0 && (
+                <Polyline
+                  coordinates={routeCoords}
+                  strokeColor="#007AFF"
+                  strokeWidth={3}
+                />
+              )}
+            </MapView>
+            <View style={styles.mapPreviewOverlay}>
+              <Text style={styles.mapPreviewText}>📍 {destination}</Text>
+            </View>
+          </View>
+        )}
         <TouchableOpacity style={styles.primaryBtn} onPress={handleStartRide}>
           <Text style={styles.primaryBtnText}>START RIDE</Text>
         </TouchableOpacity>
@@ -252,29 +448,7 @@ export default function HomeScreen({ navigation }) {
         </View>
       </View>
 
-      {/* Map Section */}
-      {showMap && selectedCoords && (
-        <View style={{ height: 300, marginBottom: 20 }}>
-          <MapView
-            style={{ flex: 1 }}
-            initialRegion={{
-              latitude: selectedCoords.latitude,
-              longitude: selectedCoords.longitude,
-              latitudeDelta: 0.05,
-              longitudeDelta: 0.05,
-            }}
-          >
-            <Marker coordinate={selectedCoords} title="Destination" />
-            {routeCoords.length > 0 && (
-              <Polyline
-                coordinates={routeCoords}
-                strokeColor="#007AFF"
-                strokeWidth={4}
-              />
-            )}
-          </MapView>
-        </View>
-      )}
+
     </ScrollView>
   );
 }
@@ -349,4 +523,28 @@ const styles = StyleSheet.create({
     marginHorizontal: 5,
   },
   quickBtnText: { color: "white", fontWeight: "bold" },
+  mapPreview: {
+    height: 150,
+    marginBottom: 15,
+    borderRadius: 10,
+    overflow: "hidden",
+    position: "relative",
+  },
+  mapPreviewMap: {
+    flex: 1,
+  },
+  mapPreviewOverlay: {
+    position: "absolute",
+    top: 10,
+    left: 10,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 15,
+  },
+  mapPreviewText: {
+    color: "white",
+    fontSize: 12,
+    fontWeight: "bold",
+  },
 });

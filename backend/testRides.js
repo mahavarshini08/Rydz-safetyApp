@@ -2,7 +2,7 @@
 const fetch = require("node-fetch");
 
 // ⚠️ Replace with your backend URL and Firebase ID token
-const API_URL = "http://localhost:4000/api/rides";
+const API_URL = "http://10.135.138.202:4000/api/rides";
 const FIREBASE_ID_TOKEN = "<YOUR_FIREBASE_ID_TOKEN>";
 
 async function runTests() {

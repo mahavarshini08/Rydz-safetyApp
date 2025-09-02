@@ -151,7 +151,7 @@ export default function MapWebView({ route, navigation }) {
             ts: loc.timestamp
           }));
 
-          // send update to backend
+          // send update to backend (but don't fail if it's down)
           if (rideId && token) {
             try {
               await fetch(`${API_URL}/api/rides/${rideId}/update`, {
@@ -165,7 +165,7 @@ export default function MapWebView({ route, navigation }) {
                 }),
               });
             } catch (err) {
-              console.error("Ride update error:", err);
+              console.error("⚠️ Ride update error (continuing):", err);
             }
           }
         }
@@ -191,26 +191,60 @@ export default function MapWebView({ route, navigation }) {
         routeCoords = routePolyline;
       }
     } else if (destinationCoords && current) {
-      // 🔹 Fetch from OSRM
+      // 🔹 Fetch from OSRM with multiple fallbacks
       try {
+        // Primary OSRM service
         const url = `https://router.project-osrm.org/route/v1/driving/${current.lng},${current.lat};${destinationCoords.longitude},${destinationCoords.latitude}?overview=full&geometries=geojson`;
-        const res = await fetch(url);
+        console.log("🔍 Fetching route from primary OSRM:", url);
+        
+        const res = await fetch(url, { timeout: 10000 });
         const json = await res.json();
+        
         if (json.routes && json.routes.length > 0) {
           routeCoords = json.routes[0].geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+          console.log("✅ Primary OSRM route fetched:", routeCoords.length, "points");
         } else {
-          // fallback to straight line
+          throw new Error("No routes found in primary OSRM response");
+        }
+      } catch (err) {
+        console.error("❌ Primary OSRM fetch failed:", err);
+        
+        // Fallback 1: Try alternative OSRM endpoint
+        try {
+          const fallbackUrl = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${current.lng},${current.lat};${destinationCoords.longitude},${destinationCoords.latitude}?overview=full&geometries=geojson`;
+          console.log("🔄 Trying fallback OSRM service:", fallbackUrl);
+          
+          const res = await fetch(fallbackUrl, { timeout: 10000 });
+          const json = await res.json();
+          
+          if (json.routes && json.routes.length > 0) {
+            routeCoords = json.routes[0].geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+            console.log("✅ Fallback OSRM route fetched:", routeCoords.length, "points");
+          } else {
+            throw new Error("No routes found in fallback OSRM response");
+          }
+        } catch (fallbackErr) {
+          console.error("❌ Fallback OSRM also failed:", fallbackErr);
+          
+          // Fallback 2: Create straight line route
+          console.log("🔄 Creating fallback straight-line route");
           routeCoords = [
             [current.lat, current.lng],
             [destinationCoords.latitude, destinationCoords.longitude]
           ];
         }
-      } catch (err) {
-        console.error("OSRM fetch failed:", err);
-        // fallback
+      }
+    } else {
+      // No destination coordinates, create a demo route
+      console.log("🔄 No destination, creating demo route");
+      if (current) {
+        const demoDest = {
+          latitude: current.lat + 0.01, // ~1km north
+          longitude: current.lng + 0.01, // ~1km east
+        };
         routeCoords = [
           [current.lat, current.lng],
-          [destinationCoords.latitude, destinationCoords.longitude]
+          [demoDest.latitude, demoDest.longitude]
         ];
       }
     }

@@ -11,7 +11,7 @@ export default function SosButton({ userId, emergencyContact, location }) {
 
     try {
       // 1️⃣ Send SOS to backend (for logging + FCM push notifications)
-      const response = await fetch("http://192.168.1.7:4000/api/sos", {
+      const response = await fetch("http://10.135.138.202:4000/api/sos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

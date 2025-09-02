@@ -79,7 +79,7 @@ export default function SignUpScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Create Account</Text>
-      <Text style={styles.subtitle}>Join Rydz Safety for secure rides</Text>
+      <Text style={styles.subtitle}>Join Flare Safety for secure rides</Text>
       
       <TextInput 
         style={styles.input} 
